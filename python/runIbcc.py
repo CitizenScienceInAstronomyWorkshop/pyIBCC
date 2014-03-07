@@ -213,6 +213,10 @@ np.savetxt(outputFile, np.concatenate([tIdxs, pT], 1))
 #write confusion matrices to file if required
 if not confMatFile is None:
     print 'writing confusion matrices to file'
-    flatAlpha = combiner.alpha.reshape(1, nClasses*nScores, K)
-    flatAlpha = np.swapaxes(flatAlpha, 0, 2)
-    np.savetxt(confMatFile, flatAlpha.reshape(K, nClasses*nScores))
+    pi = combiner.alpha
+    for l in range(nScores):
+        pi[:,l,:] = np.divide(combiner.alpha[:,l,:], np.sum(combiner.alpha,1) )
+    
+    flatPi = pi.reshape(1, nClasses*nScores, K)
+    flatPi = np.swapaxes(flatPi, 0, 2)
+    np.savetxt(confMatFile, flatPi.reshape(K, nClasses*nScores), fmt='%1.3f')
