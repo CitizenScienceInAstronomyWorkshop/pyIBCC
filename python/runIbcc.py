@@ -57,19 +57,21 @@ class Ibcc:
 
     def initParams(self):
         
-        print 'Initialising parameters...'
+        print '\n%s parameters...' % lang_dict(lang)['initial'].title()
         
         self.nu = deepcopy(self.nu0)
          
         #first copy alpha for all K citizen scientists
         #self.alpha = self.alpha0[:,:,np.newaxis]    
-        print 'Alpha0: ' + str(self.alpha0)
+        print 'Alpha0:' 
+        print self.alpha0
         self.alpha = self.alpha0[:,:,np.newaxis]
         self.alpha = np.repeat(self.alpha, self.K, axis=2)#(self.nClasses,1,self.K))
         
     def initT(self, trainT):
         
-        print 'Initialising results: ' + str(trainT)
+        print '\n%s results: ' % lang_dict(lang)['initial'].title()
+        print trainT
         self.nObjs = trainT.shape[0]
         self.ET = np.zeros((self.nObjs,self.nClasses))
     
@@ -100,7 +102,7 @@ class Ibcc:
     
     def combineClassifications(self, crowdLabels):
         
-        print 'Combining...'
+        print '\nCombining classifications ...'
         
         maxNoIts = 500
         convThreshold = 0.0001
@@ -126,10 +128,10 @@ class Ibcc:
             if nIts>=maxNoIts or change<convThreshold:
                 converged = True
             nIts+=1
-            print 'Ibcc iteration ' + str(nIts) + ' absolute change was ' + str(change)
+            print 'IBCC iteration ' + str(nIts) + ' absolute change was ' + str(change)
                 
-        print 'IBCC converged in ' + str(nIts) + ' iterations.'
-        
+        endaffix = 's' if nIts > 1 else ''
+        print 'IBCC converged in ' + str(nIts) + ' iteration' + endaffix + '.'
         
     def __init__(self, nClasses, nScores, alpha0, nu0, K, trainT):
         self.nClasses = nClasses
@@ -141,7 +143,7 @@ class Ibcc:
         self.initParams()
 
 def loadCrowdLabels(inputFile, scores):   
-    crowdLabels = np.genfromtxt(inputFile, delimiter=',')
+    crowdLabels = np.genfromtxt(inputFile, delimiter=',',comments='#')
 
     tIdxs = np.unique(crowdLabels[:,1])
 
@@ -156,17 +158,28 @@ def loadCrowdLabels(inputFile, scores):
     return (crowdLabels, tIdxs, K)
     
 def loadGold(goldFile):   
-    gold = np.genfromtxt(goldFile, delimiter=',')
+    gold = np.genfromtxt(goldFile, delimiter=',', comments='#')
     return gold
+
+def lang_dict(lang):
+    ld = {}
+    if lang == 'en-us':
+        ld['initial'] = 'initializing'
+    if lang == 'en-gb':
+        ld['initial'] = 'initialising'
+
+    return ld
+
+
+############################################################
+# Running project from command line begins here
+############################################################
 
 #read configuration
 with open(configFile, 'r') as conf:
     configuration = conf.readlines()
     for line in configuration:
         exec(line)
-
-nu0 = np.array([50,50])
-alpha0 = np.array([[2, 1], [1, 2]])
 
 #load labels from crowd
 (crowdLabels, tIdxs, K) = loadCrowdLabels(inputFile, scores)
@@ -202,17 +215,17 @@ combiner.combineClassifications(crowdLabels)
 
 #write predicted class labels to file
 pT = combiner.getET()
-print 'writing results to file (needs fixing for multi-class case'
+print '\nWriting results to file (needs fixing for multi-class case).'
 
-print str(pT.shape)
+print 'pT shape:    ' + str(pT.shape)
 tIdxs = np.reshape(tIdxs, (len(tIdxs),1))
-print str(tIdxs.shape)
+print 'tIDxs shape: ' + str(tIdxs.shape)
 
 np.savetxt(outputFile, np.concatenate([tIdxs, pT], 1))
 
 #write confusion matrices to file if required
 if not confMatFile is None:
-    print 'writing confusion matrices to file'
+    print '\nWriting confusion matrices to file.'
     pi = combiner.alpha
     for l in range(nScores):
         pi[:,l,:] = np.divide(combiner.alpha[:,l,:], np.sum(combiner.alpha,1) )
