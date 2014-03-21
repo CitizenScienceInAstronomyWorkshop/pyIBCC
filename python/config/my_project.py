@@ -4,8 +4,6 @@
 
 __author__ = "Kyle Willett"
 
-'''
-
 print 'Configuring IBCC'
 
 scores = np.array([3, 4])
