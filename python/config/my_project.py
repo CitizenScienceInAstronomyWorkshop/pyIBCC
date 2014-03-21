@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+
+''' Configuration file for pyIBCC. Currently set for Galaxy Zoo (which version?) data. '''
+
+__author__ = "Kyle Willett"
+
+'''
+
 print 'Configuring IBCC'
 
 scores = np.array([3, 4])
