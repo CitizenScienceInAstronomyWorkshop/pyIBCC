@@ -7,6 +7,7 @@ import numpy as np
 from copy import deepcopy
 from scipy.sparse import coo_matrix
 from scipy.special import psi
+from astropy.io import ascii
 
 '''
 CHANGE THE LINE BELOW IF YOU WANT TO USE A DIFFERENT CONFIG FILE!
@@ -71,7 +72,7 @@ class Ibcc:
     def initT(self, trainT):
         
         print '\n%s results: ' % lang_dict(lang)['initial'].title()
-        print trainT
+        #print trainT
         self.nObjs = trainT.shape[0]
         self.ET = np.zeros((self.nObjs,self.nClasses))
     
@@ -143,17 +144,25 @@ class Ibcc:
         self.initParams()
 
 def loadCrowdLabels(inputFile, scores):   
-    crowdLabels = np.genfromtxt(inputFile, delimiter=',',comments='#')
 
-    tIdxs = np.unique(crowdLabels[:,1])
+    print '\nLoading data for crowd labels from %s' % inputFile
 
-    kIdxs = np.unique(crowdLabels[:,0])
+    #crowdLabels = np.genfromtxt(inputFile, delimiter=',',comments='#')
+    data = ascii.read(inputFile)
+
+    # subject indices
+    tIdxs = np.unique(data['subjectID'])
+
+    # user indices
+    kIdxs = np.unique(data['userID'])
     K = len(kIdxs)
 
-    for c in range(crowdLabels.shape[0]):
-        crowdLabels[c,2] = np.where(scores==crowdLabels[c,2])[0][0]
-        crowdLabels[c,1] = np.where(tIdxs==crowdLabels[c,1])[0][0]
-        crowdLabels[c,0] = np.where(kIdxs==crowdLabels[c,0])[0][0]
+    crowdLabels = np.zeros((len(data),len(data.columns)),dtype=int)
+
+    for idx,row in enumerate(data):
+        crowdLabels[idx,0] = np.where(kIdxs==row['userID'])[0][0]
+        crowdLabels[idx,1] = np.where(tIdxs==row['subjectID'])[0][0]
+        crowdLabels[idx,2] = np.where(scores==row['score'])[0][0]
     
     return (crowdLabels, tIdxs, K)
     
@@ -170,9 +179,8 @@ def lang_dict(lang):
 
     return ld
 
-
 ############################################################
-# Running project from command line begins here
+# Running program from command line begins here
 ############################################################
 
 #read configuration
@@ -205,6 +213,7 @@ if os.path.isfile(goldFile):
         
     gold = goldSorted
 else:
+    print '\nNo gold label data found'
     gold = np.zeros((len(tIdxs), 1)) -1
 
 #initialise combiner
