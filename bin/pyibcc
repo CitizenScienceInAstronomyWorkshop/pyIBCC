@@ -1,0 +1,15 @@
+#!/usr/bin/env python
+
+# -*- mode: python -*-
+# vi: set ft=python :
+
+import argparse
+from pyIBCC.ibcc import runIbcc
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Reduce data using Edwin Simpson's pyIBCC")
+    parser.add_argument('config', help="Python configuration files for a project. See examples/ directory")
+
+    args = parser.parse_args()
+
+    runIbcc(args.config)
