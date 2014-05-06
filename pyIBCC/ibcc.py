@@ -145,7 +145,7 @@ class Ibcc:
         self.nObjs = trainT.shape[0]
         self.initT()
         
-        print 'Combining...'
+        print('Combining...')
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
@@ -175,26 +175,26 @@ class Ibcc:
                 #print 'Lower bound: ' + str(L) + ', increased by ' + str(L-oldL)
                 change = L-oldL                
                 if L-oldL<0:
-                    print 'Possible error -> lower bound went down. Maybe rounding error?'
+                    print('Possible error -> lower bound went down. Maybe rounding error?')
                 oldL = L
             else:
                 change = np.sum(np.sum(np.absolute(oldET - self.ET)))            
             if self.nIts>=self.maxNoIts or change<self.convThreshold:
                 converged = True
             self.nIts+=1
-            print 'Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change)
+            print('Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
                 
-        print 'IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.maxNoIts) + ').'
+        print('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.maxNoIts) + ').')
         return self.ET
         
     def initParams(self):
-        print 'Initialising parameters...' 
-        print 'Alpha0: ' + str(self.alpha0)
+        print('Initialising parameters...')
+        print('Alpha0: ' + str(self.alpha0))
         self.alpha = self.alpha0[:,:,np.newaxis]
         self.alpha = np.repeat(self.alpha, self.K, axis=2)
         self.initLnPi()
         
-        print 'Nu0: ' + str(self.nu0)
+        print('Nu0: ' + str(self.nu0))
         self.nu = deepcopy(self.nu0)
         self.initLnKappa()
         
@@ -235,7 +235,7 @@ def loadCrowdLabels(inputFile, scores):
             import pickle
             crowdLabels, tIdxs, K = pickle.load(inFile)
     except Exception:
-        print 'Will try to load a CSV file...'
+        print('Will try to load a CSV file...')
     
         crowdLabels = np.genfromtxt(inputFile, delimiter=',', \
                                 skip_header=1,usecols=[0,1,2])
@@ -260,7 +260,7 @@ def loadCrowdLabels(inputFile, scores):
             import pickle
             pickle.dump((crowdLabels,tIdxs,K), outFile)
     except Exception:
-        print 'Could not save the input data as a Python object file.'
+        print('Could not save the input data as a Python object file.')
     
     return (crowdLabels, tIdxMap, tIdxs, K, len(tIdxs))
     
@@ -291,7 +291,7 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None):
     
     import os.path
     if not os.path.isfile(goldFile):
-        print 'No gold labels found.'
+        print('No gold labels found.')
         gold = np.zeros((1,nObjs)) -1
         return gold
     try:
@@ -301,7 +301,7 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None):
         
     if np.any(np.isnan(gold[0])): #skip header if necessary
         gold = gold[1:,:]
-    print "gold shape: " + str(gold.shape)
+    print("gold shape: " + str(gold.shape))
     
     if len(gold.shape)==1 or gold.shape[1]==1:
         goldLabels = gold
@@ -368,18 +368,18 @@ def loadData(configFile):
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file
-    print 'writing results to file'
+    print('writing results to file')
     
-    print 'Posterior matrix: ' + str(pT.shape)
+    print('Posterior matrix: ' + str(pT.shape))
     tIdxs = np.reshape(tIdxs, (len(tIdxs),1))
-    print 'Target indexes: ' + str(tIdxs.shape)
+    print('Target indexes: ' + str(tIdxs.shape))
     
     np.savetxt(outputFile, np.concatenate([tIdxs, pT], 1))
 
 def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
     #write confusion matrices to file if required
     if not confMatFile is None:
-        print 'writing confusion matrices to file'
+        print('writing confusion matrices to file')
         pi = alpha
         for l in range(nScores):
             pi[:,l,:] = np.divide(alpha[:,l,:], np.sum(alpha,1) )
@@ -399,12 +399,3 @@ def runIbcc(configFile):
     saveAlpha(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
     
     return (pT, combiner)
-    
-if __name__ == '__main__':
-
-    if len(sys.argv)>1:
-        configFile = sys.argv[1]
-    else:
-        configFile = './config/my_project.py'
-    runIbcc(configFile)
-    

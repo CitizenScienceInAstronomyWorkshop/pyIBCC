@@ -26,9 +26,9 @@ def getAucs(testResults, labels, nClasses):
                     
         diffs = tpr-fpr
         best = np.argmax(diffs)
-        print 'The best threshold is ' + str(thresholds[best]) + ' at diff of ' + str(np.max(diffs))       
-        print 'tpr: ' + str(tpr[best])
-        print 'fpr: ' + str(fpr[best])
+        print('The best threshold is ' + str(thresholds[best]) + ' at diff of ' + str(np.max(diffs))       )
+        print('tpr: ' + str(tpr[best]))
+        print('fpr: ' + str(fpr[best]))
                     
     return (auc_result,ap)
 
@@ -45,15 +45,15 @@ def getAccMeasures(testResults, labels, nClasses, testIdxs=None):
     for j in range(1,nClasses):
         labelMatrix[labels==j,j-1] = 1
         
-    print 'Evaluating the results using curves with classification thresholds.'
+    print('Evaluating the results using curves with classification thresholds.')
         
     auc, ap = getAucs(testResults, labelMatrix, nClasses)
     
-    print 'Evaluating the results using the greedy classifications.'
+    print('Evaluating the results using the greedy classifications.')
     testResults = np.round(testResults)
     
     acc = 1 - np.sum(abs(labelMatrix-testResults), 0) / len(testIdxs)
-    print 'acc: ' + str(acc)
+    print('acc: ' + str(acc))
     acc = acc[0] #each class column will be the same. Related to a weighted average of precision across all classes
     
     disagreement = abs(labelMatrix-testResults)
@@ -114,7 +114,7 @@ def runXValidation(nFolds, configFile):
         meanAuc += auc
         meanAp += ap
         
-        print 'Nu: ' + str(combiner.nu)
+        print('Nu: ' + str(combiner.nu))
         
     #display summary of results across all folds
     meanAcc /= nFolds
@@ -124,15 +124,15 @@ def runXValidation(nFolds, configFile):
     meanAuc /= nFolds
     meanAp /= nFolds
     
-    print '---For each class separately---'
+    print('---For each class separately---')
     
-    print 'Mean Recall: ' + str(meanRecall)
-    print 'Mean Specificity: ' + str(meanSpecificity)
-    print 'Mean Precision: ' + str(meanPrecision)
-    print 'Mean AUC: ' + str(meanAuc)
-    print 'Mean AP: ' + str(meanAp)
+    print('Mean Recall: ' + str(meanRecall))
+    print('Mean Specificity: ' + str(meanSpecificity))
+    print('Mean Precision: ' + str(meanPrecision))
+    print('Mean AUC: ' + str(meanAuc))
+    print('Mean AP: ' + str(meanAp))
     
-    print '--- Means across all classes ---'
+    print('--- Means across all classes ---')
     
     #unweighted average across classes
     nClasses = combiner.nClasses-1
@@ -142,12 +142,12 @@ def runXValidation(nFolds, configFile):
     meanSpecificity = np.sum(meanSpecificity)/nClasses
     meanPrecision = np.sum(meanPrecision)/nClasses  
     
-    print 'Mean Accuracy: ' + str(meanAcc)
-    print 'Mean Recall: ' + str(meanRecall)
-    print 'Mean Specificity: ' + str(meanSpecificity)
-    print 'Mean Precision: ' + str(meanPrecision)
-    print 'Mean AUC: ' + str(meanAuc)
-    print 'Mean AP: ' + str(meanAp)
+    print('Mean Accuracy: ' + str(meanAcc))
+    print('Mean Recall: ' + str(meanRecall))
+    print('Mean Specificity: ' + str(meanSpecificity))
+    print('Mean Precision: ' + str(meanPrecision))
+    print('Mean AUC: ' + str(meanAuc))
+    print('Mean AP: ' + str(meanAp))
     
 runXValidation(1,'./config/ph_2.py')    
 #runXValidation(1,'./config/my_project.py')
