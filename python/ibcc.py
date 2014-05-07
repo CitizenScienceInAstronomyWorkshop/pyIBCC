@@ -395,8 +395,10 @@ def runIbcc(configFile):
     #combine labels
     pT = combiner.combineClassifications(crowdLabels, gold)
 
-    saveTargets(pT, tIdxs, outputFile)
-    saveAlpha(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
+    if outputFile != None:
+        saveTargets(pT, tIdxs, outputFile)
+    if confMatFile != None:
+        saveAlpha(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
     
     return (pT, combiner)
     
