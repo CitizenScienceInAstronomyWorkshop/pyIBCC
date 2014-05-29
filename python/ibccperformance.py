@@ -9,7 +9,11 @@ import numpy as np
 from sklearn.cross_validation import KFold
 from sklearn.metrics import roc_curve, average_precision_score, auc
 import matplotlib.pyplot as plt
+import matplotlib.legend as leg
 
+figure1 = 1
+figure2 = 2
+figure3 = 3
 def getAucs(testResults, labels, nClasses):
     '''
     Calculate the area under the ROC curve (called AUC) and 
@@ -45,11 +49,7 @@ def getAccMeasures(testResults, labels, nClasses, testIdxs=None):
     labelMatrix = np.zeros((len(labels),nClasses-1)) 
     for j in range(1,nClasses):
         labelMatrix[labels==j,j-1] = 1
-        
-    print 'Evaluating the results using curves with classification thresholds.'
-        
-    auc, ap = getAucs(testResults, labelMatrix, nClasses)
-    
+            
     print 'Evaluating the results using the greedy classifications.'
     testResults = np.round(testResults)
     
@@ -65,51 +65,74 @@ def getAccMeasures(testResults, labels, nClasses, testIdxs=None):
     tp = np.sum(agreement[labels>=1,:],0) 
     tn = np.sum(agreement[labels==0,:],0)
         
-    recall = tp / (tp+fn)
-    spec = tn/(fp+tn)
-    prec = tp / (tp+fp)
+    if tp+fn==0:
+        print "recall unknown"
+        recall = 0
+    else:
+        recall = tp / (tp+fn)
+        
+    if fp+tn==0:
+        print "specificity unknown"
+        spec = 0
+    else:
+        spec = tn/(fp+tn)
+        
+    if tp+fp==0:
+        "precision unknown"
+        prec = 0
+    else:
+        prec = tp / (tp+fp)
+        
+    print 'Evaluating the results using curves with classification thresholds.'
+    if fp+tn==0 or tp+fn==0:
+        print 'Incomplete test labels, cannot evaluate AUC'
+        auc = np.zeros(nClasses-1)
+        ap = np.zeros(nClasses-1)
+    else:
+        auc, ap = getAucs(testResults, labelMatrix, nClasses)        
         
     return (acc,recall,spec,prec,auc,ap)
 
-def plotCumDist(pT,nClasses,foldTestIdxs,gold):    
+def plotCumDist(pT,nClasses,testIdxs,gold,label=""):    
     #sort probabilities in order
     #x values are the probabilities
     #y values are indices
     # have to select the highest y value for any duplicate x values
-    
-    for j in range(1,nClasses):#skip first class as this is used for uninteresting examples
-        X = np.sort(pT[:,j]).reshape(-1)
-        X = 1-X
-        Y = np.array(range(len(X)))
-        plt.figure()
-        plt.plot(X,Y)
-        plt.xlabel('Probability of Planet')
+    #skip first class as this is used for uninteresting examples
+    for j in range(1,nClasses):
+        X = np.sort(pT[testIdxs,j]).reshape(-1)
+        Y = - np.array(range(len(X))) + len(X) 
+        plt.figure(figure1)
+        plt.plot(X,Y, label=label)
+        plt.legend(loc='lower center')
+        plt.xlabel('Probability of Class ' + str(j))
         plt.ylabel('No. Candidates')
         plt.title('Cumulative Distribution of All Candidates')
+        plt.hold(True)
         
-        plt.figure()
-        X = X[gold==j]
-        Y = np.array(range(len(X)))
-        plt.plot(X,Y)
-        plt.xlabel('Probability of Planet')
+        testIdxs_j = testIdxs[gold[testIdxs]==j]
+        X = np.sort(pT[testIdxs_j,j]).reshape(-1)
+        Y = - np.array(range(len(X))) + len(X) 
+        plt.figure(figure2)
+        plt.plot(X,Y, label=label)
+        plt.legend(loc='lower center')
+        plt.xlabel('Probability of Class ' + str(j))
         plt.ylabel('No. Candidates')
-        plt.title('Cumulative Distribution of Candidates with Confirmed Class Label ' + str(j))
+        plt.title('Cumulative Distribution of Candidates of Class ' + str(j) )
+        plt.hold(True)
 
-def testIbccPerformance(combiner, crowdLabels, goldTraining, goldAll, testIdxs=None):
-    #An alternative to the runIbcc function in the Ibcc module, which does not save the resulting 
-    #classifications, but prints a performance analysis
-    if testIdxs==None:
-        trIdxs = np.argwhere(goldAll>-1)
-        testIdxs = trIdxs.reshape(-1)
- 
-    pT = combiner.combineClassifications(crowdLabels, goldTraining)
-    print 'Nu: ' + str(combiner.nu)  
-    plotCumDist(pT,combiner.nClasses,testIdxs,goldAll)        
-    
-    #analyse the accuracy of the results
-    acc,recall,spec,prec,auc,ap = getAccMeasures(pT,goldAll,combiner.nClasses,testIdxs) 
-    return (acc,recall,spec,prec,auc,ap)
-
+        testIdxs_j = testIdxs[gold[testIdxs]==j]
+        X = np.sort(pT[testIdxs_j,j]).reshape(-1)
+        Y = (- np.array( range(len(X)) ) + float(len(X)) )
+        Y = np.float32(Y)/float(len(X))
+        plt.figure(figure3)
+        plt.plot(X,Y, label=label)
+        plt.legend(loc='lower center')
+        plt.xlabel('Probability of Class ' + str(j))
+        plt.ylabel('No. Candidates')
+        plt.title('Normalised Cumulative Distribution of Candidates of Class ' + str(j) )
+        plt.hold(True)
+        
 def printResults(meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp):
     print '---For each class separately---'
     
@@ -136,21 +159,64 @@ def printResults(meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp
     print 'Mean AUC: ' + str(meanAuc)
     print 'Mean AP: ' + str(meanAp)
 
-def testUnsupervised(configFile):
+def testIbccPerformance(combiner, crowdLabels, goldTraining, goldAll, \
+                        testIdxs=None, label="", eval=True):
+    #An alternative to the runIbcc function in the Ibcc module, which does not save the resulting 
+    #classifications, but prints a performance analysis
+    if testIdxs==None:
+        testIdxs = np.argwhere(np.bitwise_and(goldAll>-1,goldTraining==-1))
+        testIdxs = testIdxs.reshape(-1)
+ 
+    print ' No. test indexes = ' + str(len(testIdxs))
+ 
+    pT = combiner.combineClassifications(crowdLabels, goldTraining)
+    print 'Nu: ' + str(combiner.nu)  
+    
+    #analyse the accuracy of the results
+    if not eval:
+        return pT, testIdxs
+    
+    plotCumDist(pT,combiner.nClasses,testIdxs,goldAll, label)        
+    acc,recall,spec,prec,auc,ap = \
+        getAccMeasures(pT,goldAll,combiner.nClasses,testIdxs)
+  
+    return (pT,testIdxs,acc,recall,spec,prec,auc,ap) 
+
+def testUnsupervised(configFile, label, eval=True):
     # no training data, test all points we have true labels for
-    combiner, crowdLabels, gold, _,_,_ = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, _,_,_,_,goldTypes = ibcc.loadData(configFile)
     
     goldTr = np.zeros(len(gold)) -1 
     
-    (acc,recall,spec,prec,auc,ap) = testIbccPerformance(combiner, crowdLabels, goldTr, gold)
-    printResults(acc,recall,spec,prec,auc,ap)
+    if eval:
+        pT,testIdxs,acc,recall,spec,prec,auc,ap = testIbccPerformance(combiner, crowdLabels, goldTr,\
+                                        gold, label=label, eval=eval)
+        printResults(acc,recall,spec,prec,auc,ap)
+    else:
+        pT,testIdxs = testIbccPerformance(combiner, crowdLabels, goldTr,\
+                                        gold, label=label, eval=eval)
+    return pT,goldTypes,testIdxs,gold
     
-def testSupervised(configFile):
+def testSupervised(configFile, label, trIds=None, goldTr=None, eval=True):
     #supply all training data. The metrics will be unfair
-    combiner, crowdLabels, gold, _,_,_ = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, _, trIdxs,_,_,goldTypes = ibcc.loadData(configFile)
+
+    if trIdxs != None and goldTr==None:
+        goldTr = np.zeros(len(gold)) -1
+        #trIds = np.sort(np.array(trIds)) #original Ids -- find their indexes in tIdxs
+        #trIdxs = np.searchsorted(trIds, tIdxs)
+        goldTr[trIdxs] = gold[trIdxs]
+    elif goldTr==None:
+        goldTr = gold
     
-    (acc,recall,spec,prec,auc,ap) = testIbccPerformance(combiner, crowdLabels, gold, gold)
-    printResults(acc,recall,spec,prec,auc,ap)
+    if eval:
+        pT,testIdxs,acc,recall,spec,prec,auc,ap = testIbccPerformance(combiner, crowdLabels, \
+                                        goldTr, gold, label=label, eval=eval)
+        printResults(acc,recall,spec,prec,auc,ap)
+    else:
+        pT,testIdxs = testIbccPerformance(combiner, crowdLabels, \
+                                        goldTr, gold, label=label, eval=eval)
+    return pT,goldTypes,testIdxs,gold
 
 def testXValidation(nFolds, configFile):
     '''
@@ -164,7 +230,7 @@ def testXValidation(nFolds, configFile):
         return
     
     #load the data
-    combiner, crowdLabels, gold, _,_,_ = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, _,_,_,_ = ibcc.loadData(configFile)
     
     meanAcc = 0
     meanRecall = np.zeros((1,combiner.nClasses-1))
@@ -185,7 +251,7 @@ def testXValidation(nFolds, configFile):
         goldPartition[trIdxs[trMask]] = gold[trIdxs[trMask]]
         foldTestIdxs = trIdxs[testMask].reshape(-1)
         
-        acc,recall,spec,prec,auc,ap = testIbccPerformance(combiner, crowdLabels, goldPartition, gold, foldTestIdxs)  
+        _,_,acc,recall,spec,prec,auc,ap = testIbccPerformance(combiner, crowdLabels, goldPartition, gold, foldTestIdxs, label=configFile)  
         
         #save to overall summary
         meanAcc += acc
@@ -203,7 +269,5 @@ def testXValidation(nFolds, configFile):
     meanAp /= nFolds
     #display summary of results across all folds
     printResults(meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp)
-    
-testUnsupervised('./python/config/ph_2.py')    
+ 
 #testXValidation('./config/my_project.py')
-#testXValidation('./config/thesis_synth.py')

@@ -230,10 +230,12 @@ def loadCrowdLabels(inputFile, scores):
     Loads labels from crowd in sparse list format, i.e. 3 columns, classifier ID,
     object ID, score.
     '''
+    pyFileExists = False
     try:
         with open(inputFile+'.dat','r') as inFile:
             import pickle
             crowdLabels, tIdxs, K = pickle.load(inFile)
+            pyFileExists = True
     except Exception:
         print 'Will try to load a CSV file...'
     
@@ -255,12 +257,13 @@ def loadCrowdLabels(inputFile, scores):
     tIdxMap = coo_matrix(( idxList, (tIdxs,blanks)), shape=(maxT+1,1) )
     tIdxMap = tIdxMap.tocsr()
     
-    try:
-        with open(inputFile+'.dat', 'wb') as outFile:
-            import pickle
-            pickle.dump((crowdLabels,tIdxs,K), outFile)
-    except Exception:
-        print 'Could not save the input data as a Python object file.'
+    if not pyFileExists:
+        try:
+            with open(inputFile+'.dat', 'wb') as outFile:
+                import pickle
+                pickle.dump((crowdLabels,tIdxs,K), outFile)
+        except Exception:
+            print 'Could not save the input data as a Python object file.'
     
     return (crowdLabels, tIdxMap, tIdxs, K, len(tIdxs))
     
@@ -287,15 +290,21 @@ def loadCrowdTable(inputFile, scores):
     tIdxMap = tIdxMap.tocsr()
     return (crowdTable, tIdxMap, tIdxs, K, len(tIdxs))  
     
-def loadGold(goldFile, tIdxMap, nObjs, classLabels=None):   
+def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):   
     
     import os.path
     if not os.path.isfile(goldFile):
         print 'No gold labels found.'
         gold = np.zeros((1,nObjs)) -1
         return gold
+    
+    if secondaryTypeCol>-1:
+        useCols=[0,1,secondaryTypeCol]
+    else:
+        useCols=[0,1]
+        
     try:
-        gold = np.genfromtxt(goldFile, delimiter=',', skip_header=0,usecols=[0,1],invalid_raise=True)
+        gold = np.genfromtxt(goldFile, delimiter=',', skip_header=0,usecols=useCols,invalid_raise=True)
     except Exception:
         gold = np.genfromtxt(goldFile, delimiter=',', skip_header=0)
         
@@ -307,11 +316,22 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None):
         goldLabels = gold
     else:
         goldLabels = gold[:,1]
+        
         goldIdxs = gold[:,0]
+        #map the original idxs to local idxs
         goldIdxs = tIdxMap[goldIdxs,0].todense()
+        
+        #create an array for gold for all the objects/data points in this test set
         goldSorted = np.zeros(nObjs) -1
         goldSorted[goldIdxs] = gold[:,1]
         goldLabels = goldSorted
+        
+        #if there is secondary type info, create a similar array for this
+        if secondaryTypeCol>-1:
+            goldTypes = np.zeros(nObjs)
+            goldTypes[goldIdxs] = gold[:,2]
+            goldTypes[np.isnan(goldTypes)] = 0 #some examples may have no type info
+            goldTypes[goldLabels==-1] = -1 #negative examples have type -1
           
     if classLabels:
         #convert text to class IDs
@@ -320,8 +340,12 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None):
             if classIdx:
                 goldLabels[i] = classIdx
             else:
-                goldLabels[i] = -1      
-    return goldLabels
+                goldLabels[i] = -1
+    
+    if secondaryTypeCol>-1:
+        return goldLabels, goldTypes
+    else: 
+        return goldLabels
 
 def loadData(configFile):
     #Defaults that will usually be overwritten by project config
@@ -342,7 +366,12 @@ def loadData(configFile):
     confMatFile = './output/confMat.csv'
     classLabels = None
     nu0 = np.array([50.0, 50.0])
-    alpha0 = np.array([[2, 1], [1, 2]])    
+    alpha0 = np.array([[2, 1], [1, 2]])   
+    trainIds = None #IDs of targets that should be used as training data. Optional 
+    
+    #column index of secondary type information about the data points stored in the gold file. 
+    #-1 means no such info
+    goldTypeCol = -1
     
     def translateGold(gold):
         return gold
@@ -357,14 +386,24 @@ def loadData(configFile):
         (crowdLabels, tIdxMap, tIdxs, K, nObjs) = loadCrowdTable(inputFile, scores)
     else:
         (crowdLabels, tIdxMap, tIdxs, K, nObjs) = loadCrowdLabels(inputFile, scores)
-    
-    #load gold labels if present
-    gold = loadGold(goldFile, tIdxMap, nObjs, classLabels)
-    gold = translateGold(gold)
-        
+
     #initialise combiner
     combiner = Ibcc(nClasses, nScores, alpha0, nu0, K, tableFormat)
-    return (combiner,crowdLabels,gold,tIdxs,outputFile,confMatFile)    
+    
+    #load gold labels if present
+    if goldTypeCol>-1:
+        gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
+    else:
+        gold = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
+        goldTypes = None
+        
+    gold = translateGold(gold)
+    
+    #map the training IDs to our local indexes
+    if trainIds != None:
+        trainIds = tIdxMap[trainIds,0].todense()
+    
+    return (combiner,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes)             
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file
@@ -390,7 +429,7 @@ def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
 
 def runIbcc(configFile):
         
-    (combiner,crowdLabels,gold,tIdxs,outputFile,confMatFile) = loadData(configFile)
+    (combiner,crowdLabels,gold,tIdxs,_,outputFile,confMatFile) = loadData(configFile)
         
     #combine labels
     pT = combiner.combineClassifications(crowdLabels, gold)
