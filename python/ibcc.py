@@ -6,6 +6,7 @@ import numpy as np
 from copy import deepcopy
 from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
+import pickle
 
 class Ibcc:
     
@@ -119,6 +120,16 @@ class Ibcc:
         #print 'EEnergy ' + str(EEnergy) + ', H ' + str(H)
         return L
         
+    def preprocessTraining(self, crowdLabels, trainT=None):
+        if trainT==None:
+            if (crowdLabels.shape[1]!=3 or self.crowdTable != None):
+                trainT = np.zeros(crowdLabels.shape[0]) -1
+            else:
+                trainT = np.zeros(np.max(crowdLabels[:,1]))
+        
+        self.trainT = trainT
+        self.nObjs = trainT.shape[0]        
+        
     def preprocessCrowdLabels(self, crowdLabels):
         C = {}
         crowdLabels = crowdLabels
@@ -139,10 +150,9 @@ class Ibcc:
                 self.crowdLabels = crowdLabels
         self.C = C
     
-    def combineClassifications(self, crowdLabels, trainT):
+    def combineClassifications(self, crowdLabels, trainT=None):
         
-        self.trainT = trainT
-        self.nObjs = trainT.shape[0]
+        self.preprocessTraining(crowdLabels, trainT)
         self.initT()
         
         print 'Combining...'
@@ -233,7 +243,6 @@ def loadCrowdLabels(inputFile, scores):
     pyFileExists = False
     try:
         with open(inputFile+'.dat','r') as inFile:
-            import pickle
             crowdLabels, tIdxs, K = pickle.load(inFile)
             pyFileExists = True
     except Exception:
@@ -260,7 +269,6 @@ def loadCrowdLabels(inputFile, scores):
     if not pyFileExists:
         try:
             with open(inputFile+'.dat', 'wb') as outFile:
-                import pickle
                 pickle.dump((crowdLabels,tIdxs,K), outFile)
         except Exception:
             print 'Could not save the input data as a Python object file.'
@@ -295,8 +303,8 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):
     import os.path
     if not os.path.isfile(goldFile):
         print 'No gold labels found.'
-        gold = np.zeros((1,nObjs)) -1
-        return gold
+        gold = np.zeros(nObjs) -1
+        return gold, None
     
     if secondaryTypeCol>-1:
         useCols=[0,1,secondaryTypeCol]
@@ -345,7 +353,7 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):
     if secondaryTypeCol>-1:
         return goldLabels, goldTypes
     else: 
-        return goldLabels
+        return goldLabels, None
 
 def loadData(configFile):
     #Defaults that will usually be overwritten by project config
@@ -391,11 +399,7 @@ def loadData(configFile):
     combiner = Ibcc(nClasses, nScores, alpha0, nu0, K, tableFormat)
     
     #load gold labels if present
-    if goldTypeCol>-1:
-        gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
-    else:
-        gold = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
-        goldTypes = None
+    gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
         
     gold = translateGold(gold)
     
@@ -403,7 +407,7 @@ def loadData(configFile):
     if trainIds != None:
         trainIds = tIdxMap[trainIds,0].todense()
     
-    return (combiner,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes)             
+    return combiner,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes             
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file
@@ -429,7 +433,7 @@ def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
 
 def runIbcc(configFile):
         
-    (combiner,crowdLabels,gold,tIdxs,_,outputFile,confMatFile) = loadData(configFile)
+    combiner,crowdLabels,gold,tIdxs,_,outputFile,confMatFile,_ = loadData(configFile)
         
     #combine labels
     pT = combiner.combineClassifications(crowdLabels, gold)
