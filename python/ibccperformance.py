@@ -199,7 +199,7 @@ def testUnsupervised(configFile, label, eval=True):
     
 def testSupervised(configFile, label, trIds=None, goldTr=None, eval=True):
     #supply all training data. The metrics will be unfair
-    combiner, crowdLabels, gold, _, trIdxs,_,_,goldTypes = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, origCandIds, trIdxs,_,_,goldTypes = ibcc.loadData(configFile)
 
     if trIdxs != None and goldTr==None:
         goldTr = np.zeros(len(gold)) -1
@@ -216,7 +216,7 @@ def testSupervised(configFile, label, trIds=None, goldTr=None, eval=True):
     else:
         pT,testIdxs = testIbccPerformance(combiner, crowdLabels, \
                                         goldTr, gold, label=label, eval=eval)
-    return pT,goldTypes,testIdxs,gold
+    return pT,goldTypes,testIdxs,gold,crowdLabels,origCandIds
 
 def testXValidation(nFolds, configFile):
     '''

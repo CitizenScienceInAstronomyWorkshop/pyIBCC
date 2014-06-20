@@ -273,7 +273,7 @@ def loadCrowdLabels(inputFile, scores):
         except Exception:
             print 'Could not save the input data as a Python object file.'
     
-    return (crowdLabels, tIdxMap, tIdxs, K, len(tIdxs))
+    return crowdLabels, tIdxMap, tIdxs, K, len(tIdxs)
     
 def loadCrowdTable(inputFile, scores):
     '''
@@ -368,7 +368,6 @@ def loadData(configFile):
     # 0 = object ID
     # 1 = class label
     scores = np.array([3, 4])
-    nScores = len(scores)
     nClasses = 2
     outputFile =  './output/output.csv'
     confMatFile = './output/confMat.csv'
@@ -388,6 +387,8 @@ def loadData(configFile):
     with open(configFile, 'r') as conf:
         configuration = conf.read()
         exec(configuration)
+
+    nScores = len(scores)
 
     #load labels from crowd
     if tableFormat:
@@ -443,7 +444,7 @@ def runIbcc(configFile):
     if confMatFile != None:
         saveAlpha(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
     
-    return (pT, combiner)
+    return pT, combiner
     
 if __name__ == '__main__':
 
