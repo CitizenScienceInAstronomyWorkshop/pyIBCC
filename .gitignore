@@ -34,3 +34,7 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+data/test1/input.csv.dat
+data/PH data/
+output/ph/
+.spyderproject

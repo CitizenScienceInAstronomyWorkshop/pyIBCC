@@ -8,10 +8,11 @@ from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
 import pickle
 
-class Ibcc:
+class Ibcc(object):
     
     useLowerBound = True #may be quicker not to calculate this
     
+    minNoIts = 1
     maxNoIts = 500
     convThreshold = 0.0001
     
@@ -24,9 +25,18 @@ class Ibcc:
     alpha0 = None
     nu0 = None
     K = None
+    
+    #The model
+    lnKappa = []
+    nu = []
+    lnPi = []
+    alpha = []
+    ET = []
+    
+    obsIdxs = []
 
     def expecLnKappa(self):#Posterior Hyperparams
-        sumET = np.sum(self.ET, 0)
+        sumET = np.sum(self.ET[self.obsIdxs,:], 0)
         for j in range(self.nClasses):
             self.nu[j] = self.nu0[j] + sumET[j]
         self.initLnKappa()
@@ -87,20 +97,33 @@ class Ibcc:
             self.ET[self.trainT==j,:] = row    
             
         return lnjoint
+      
+    def postLnJoint(self, lnjoint):
+        lnpCT = np.sum(np.sum( np.multiply(lnjoint, self.ET) ))                        
+        return lnpCT      
+            
+    def postLnKappa(self):
+        lnpKappa = gammaln(np.sum(self.nu0))-np.sum(gammaln(self.nu0)) \
+                    + sum(np.multiply(self.nu0-1,self.lnKappa))
+        return lnpKappa
         
+    def qLnKappa(self):
+        lnqKappa = gammaln(np.sum(self.nu))-np.sum(gammaln(self.nu)) \
+                        + np.sum(np.multiply(self.nu-1,self.lnKappa))
+        return lnqKappa
+    
     def lowerBound(self, lnjoint):
                         
         #probability of these targets is 1 as they are training labels
         #lnjoint[self.trainT!=-1,:] -= np.reshape(self.lnKappa, (1,self.nClasses))
-        lnpCT = np.sum(np.sum( np.multiply(lnjoint, self.ET) ))                        
+        lnpCT = self.postLnJoint(lnjoint)                    
                         
         alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, 1))
         lnpPi = gammaln(np.sum(alpha0, 1))-np.sum(gammaln(alpha0),1) \
                     + np.sum(np.multiply(alpha0-1, self.lnPi), 1)
         lnpPi = np.sum(np.sum(lnpPi))
             
-        lnpKappa = gammaln(np.sum(self.nu0))-np.sum(gammaln(self.nu0)) \
-                    + sum(np.multiply(self.nu0-1,self.lnKappa))
+        lnpKappa = self.postLnKappa()
             
         EEnergy = lnpCT + lnpPi + lnpKappa
         
@@ -111,8 +134,7 @@ class Ibcc:
                     np.sum( np.multiply(self.alpha-1,self.lnPi), 1)
         lnqPi = np.sum(np.sum(lnqPi))        
             
-        lnqKappa = gammaln(np.sum(self.nu))-np.sum(gammaln(self.nu)) \
-                        + np.sum(np.multiply(self.nu-1,self.lnKappa))
+        lnqKappa = self.qLnKappa()
             
         H = - lnqT - lnqPi - lnqKappa
         L = EEnergy + H
@@ -125,20 +147,20 @@ class Ibcc:
             if (crowdLabels.shape[1]!=3 or self.crowdTable != None):
                 trainT = np.zeros(crowdLabels.shape[0]) -1
             else:
-                trainT = np.zeros(np.max(crowdLabels[:,1]))
+                trainT = np.zeros(np.max(crowdLabels[:,1])) -1
         
         self.trainT = trainT
         self.nObjs = trainT.shape[0]        
         
     def preprocessCrowdLabels(self, crowdLabels):
         C = {}
-        crowdLabels = crowdLabels
         if crowdLabels.shape[1]!=3 or self.crowdTable != None:            
             for l in range(self.nScores):
                 Cl = np.matrix(np.zeros(crowdLabels.shape))
                 Cl[crowdLabels==l] = 1
                 C[l] = Cl
-                self.crowdTable = crowdLabels
+            self.crowdTable = crowdLabels
+            self.obsIdxs = np.argwhere(np.sum(crowdLabels,axis=1)>=0)
         else:            
             for l in range(self.nScores):
                 lIdxs = np.where(crowdLabels[:,2]==l)[0]     
@@ -147,8 +169,10 @@ class Ibcc:
                 cols = np.array(crowdLabels[lIdxs,0]).reshape(-1)     
                 Cl = coo_matrix((data,(rows,cols)), shape=(self.nObjs, self.K))
                 C[l] = Cl
-                self.crowdLabels = crowdLabels
+            self.crowdLabels = crowdLabels
+            self.obsIdxs = np.unique(crowdLabels[:1])
         self.C = C
+
     
     def combineClassifications(self, crowdLabels, trainT=None):
         
@@ -189,7 +213,7 @@ class Ibcc:
                 oldL = L
             else:
                 change = np.sum(np.sum(np.absolute(oldET - self.ET)))            
-            if self.nIts>=self.maxNoIts or change<self.convThreshold:
+            if (self.nIts>=self.maxNoIts or change<self.convThreshold) and self.nIts>self.minNoIts:
                 converged = True
             self.nIts+=1
             print 'Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change)
@@ -200,19 +224,19 @@ class Ibcc:
     def initParams(self):
         print 'Initialising parameters...' 
         print 'Alpha0: ' + str(self.alpha0)
-        self.alpha = self.alpha0[:,:,np.newaxis]
-        self.alpha = np.repeat(self.alpha, self.K, axis=2)
         self.initLnPi()
         
         print 'Nu0: ' + str(self.nu0)
-        self.nu = deepcopy(self.nu0)
         self.initLnKappa()
         
     def initLnKappa(self):
+        self.nu = deepcopy(self.nu0)
         sumNu = np.sum(self.nu)
         self.lnKappa = psi(self.nu) - psi(sumNu)
         
     def initLnPi(self):
+        self.alpha = self.alpha0[:,:,np.newaxis]
+        self.alpha = np.repeat(self.alpha, self.K, axis=2)        
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         self.lnPi = np.zeros((self.nClasses,self.nScores,self.K))
@@ -220,7 +244,7 @@ class Ibcc:
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha 
         
     def initT(self):        
-        kappa = self.nu0 / np.sum(self.nu0)        
+        kappa = self.nu / np.sum(self.nu, axis=0)        
         self.ET = np.matrix(np.zeros((self.nObjs,self.nClasses))) + kappa  
         
     def __init__(self, nClasses, nScores, alpha0, nu0, K, tableFormat=False):
@@ -355,7 +379,25 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):
     else: 
         return goldLabels, None
 
+def initFromConfig(configFile, K, tableFormat=False):
+    nClasses = 2
+    scores = np.array([3, 4])
+    nu0 = np.array([50.0, 50.0])
+    alpha0 = np.array([[2, 1], [1, 2]])     
+        
+    #read configuration
+    with open(configFile, 'r') as conf:
+        configuration = conf.read()
+        exec(configuration)        
+        
+    nScores = len(scores)
+    #initialise combiner
+    combiner = Ibcc(nClasses, nScores, alpha0, nu0, K, tableFormat)
+    
+    return combiner
+    
 def loadData(configFile):
+    
     #Defaults that will usually be overwritten by project config
     inputFile = './data/input.csv'
     tableFormat = False
@@ -368,12 +410,11 @@ def loadData(configFile):
     # 0 = object ID
     # 1 = class label
     scores = np.array([3, 4])
-    nClasses = 2
+    
     outputFile =  './output/output.csv'
     confMatFile = './output/confMat.csv'
     classLabels = None
-    nu0 = np.array([50.0, 50.0])
-    alpha0 = np.array([[2, 1], [1, 2]])   
+  
     trainIds = None #IDs of targets that should be used as training data. Optional 
     
     #column index of secondary type information about the data points stored in the gold file. 
@@ -386,18 +427,13 @@ def loadData(configFile):
     #read configuration
     with open(configFile, 'r') as conf:
         configuration = conf.read()
-        exec(configuration)
-
-    nScores = len(scores)
+        exec(configuration)    
 
     #load labels from crowd
     if tableFormat:
         (crowdLabels, tIdxMap, tIdxs, K, nObjs) = loadCrowdTable(inputFile, scores)
     else:
         (crowdLabels, tIdxMap, tIdxs, K, nObjs) = loadCrowdLabels(inputFile, scores)
-
-    #initialise combiner
-    combiner = Ibcc(nClasses, nScores, alpha0, nu0, K, tableFormat)
     
     #load gold labels if present
     gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
@@ -408,7 +444,7 @@ def loadData(configFile):
     if trainIds != None:
         trainIds = tIdxMap[trainIds,0].todense()
     
-    return combiner,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes             
+    return K,tableFormat,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes             
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file
@@ -433,8 +469,8 @@ def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
         np.savetxt(confMatFile, flatPi.reshape(K, nClasses*nScores), fmt='%1.3f')    
 
 def runIbcc(configFile):
-        
-    combiner,crowdLabels,gold,tIdxs,_,outputFile,confMatFile,_ = loadData(configFile)
+    K,tableFormat,crowdLabels,gold,tIdxs,_,outputFile,confMatFile,_ = loadData(configFile)
+    combiner = initFromConfig(configFile, K, tableFormat)
         
     #combine labels
     pT = combiner.combineClassifications(crowdLabels, gold)

@@ -14,12 +14,12 @@ def translateGold(gold):
 scores = np.array([9, 10])
 nScores = len(scores)
 nClasses = 2
-inputFile =   './data/PH data/PlanetHunters_3-26-14_Q1_ann_realAndSim.csv'
-goldFile =    './data/PH data/PlanetHunters_3-26-14_Q1_light_curves_and_sims.csv'
+inputFile =   './data/PH data/paper_crowd/PlanetHunters_3-26-14_Q1_ann_realAndSim.csv'
+goldFile =    './data/PH data/paper_gold/PH3-26-14_Q1_sims_with_real.csv'
 outputFile =  './output/ph/output.csv'
 confMatFile = './output/ph/confMat.csv'
 classLabels=None#do this conversion in a spreadsheet due to bugs['candidate','planet','eb','simulation']
-alpha0 = np.array([[1, 2], [2, 1]]) #for PH data
+alpha0 = np.array([[190, 200], [200, 190]]) #for PH data
 nu0 = np.array([10.0, 10.0])
 trainIdFile = './data/PH data/PlanetHunters_3-26-14_Q1_simulations_IBCC.csv'
 try:

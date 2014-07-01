@@ -184,7 +184,7 @@ def testIbccPerformance(combiner, crowdLabels, goldTraining, goldAll, \
 
 def testUnsupervised(configFile, label, eval=True):
     # no training data, test all points we have true labels for
-    combiner, crowdLabels, gold, _,_,_,_,goldTypes = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, _,_,_,_,goldTypes = ibcc.initFromConfig(configFile)
     
     goldTr = np.zeros(len(gold)) -1 
     
@@ -199,7 +199,7 @@ def testUnsupervised(configFile, label, eval=True):
     
 def testSupervised(configFile, label, trIds=None, goldTr=None, eval=True):
     #supply all training data. The metrics will be unfair
-    combiner, crowdLabels, gold, origCandIds, trIdxs,_,_,goldTypes = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, origCandIds, trIdxs,_,_,goldTypes = ibcc.initFromConfig(configFile)
 
     if trIdxs != None and goldTr==None:
         goldTr = np.zeros(len(gold)) -1
@@ -230,7 +230,7 @@ def testXValidation(nFolds, configFile):
         return
     
     #load the data
-    combiner, crowdLabels, gold, _,_,_,_ = ibcc.loadData(configFile)
+    combiner, crowdLabels, gold, _,_,_,_ = ibcc.initFromConfig(configFile)
     
     meanAcc = 0
     meanRecall = np.zeros((1,combiner.nClasses-1))
