@@ -21,7 +21,7 @@ confMatFile = './output/ph/confMat.csv'
 classLabels=None#do this conversion in a spreadsheet due to bugs['candidate','planet','eb','simulation']
 alpha0 = np.array([[199, 200], [200, 199]]) #for PH data
 nu0 = np.array([10.0, 10.0])
-trainIdFile = './data/PH data/PlanetHunters_3-26-14_Q1_simulations_IBCC.csv'
+trainIdFile = './data/PH data/paper_gold/PlanetHunters_3-26-14_Q1_simulations_IBCC.csv'
 try:
     trainIds = np.genfromtxt(trainIdFile, delimiter=',', skip_header=1,usecols=[0,1],invalid_raise=True)
 except Exception:

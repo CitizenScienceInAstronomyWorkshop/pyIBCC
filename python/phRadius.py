@@ -68,7 +68,7 @@ def plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label):
     totalNs = np.zeros(len(tVals))
     recall = np.zeros(len(tVals))
     cumRecall = np.zeros(len(tVals))
-
+    
     for i,t in enumerate(tVals):
         
         thisType = np.bitwise_and(goldTypes<t, goldTypes>=start)
@@ -149,91 +149,91 @@ ip.figure3 = 3
 
 # #TEST SET 1: Q1 Real Data Performance -- put that in the title
 # #only the real q1 data
-# ip.testUnsupervised('./python/config/ph_q1_uns.py', "unsup. learning on real data")
+ip.testUnsupervised('./python/config/ph_q1_uns.py', "unsup. learning on real data")
 # #real data plus sims. Evaluate on real
-# ip.testUnsupervised('./python/config/ph_q1_uns_plussims.py', "unsup. learning with real+sim data")
+ip.testUnsupervised('./python/config/ph_q1_uns_plussims.py', "unsup. learning with real+sim data")
 # #real data plus sims. Eval on real. Sims as training.
-# label = "simulations as training data"
-# pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised('./python/config/ph_q1_supe_plussims.py', label)
-# plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-
-# plt.figure()
-# plt.figure()
-# plt.figure()
-# ip.figure1 = 4
-# ip.figure2 = 5
-# ip.figure3 = 6
-
-plt.figure(7)
-figure7 = 7
-plt.figure(8)
-figure8 = 8
-
-#TEST SET 2: Q1 Simulated Data Performance, all models learned using simulated and real crowd data.
-#real data plus sims, evaluate only on sims 
-#label = "unsup. learning with real+sim data"
-#pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
-#                                    './python/config/ph_q1_uns_sims.py', label)
-#plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-#sims only
-#label = "unsup. learning with sim data only"
-#pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
-#                                    './python/config/ph_q1_uns_simsonly.py', label)#sims only, evaluate on sims
-#plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-#real data plus sims. Eval on half of sims, other half as training.
-#label = "real+sim data, 50% sims. as training data"
-#pT,goldTypes,testIdxs,goldAll,_,_ = ip.testSupervised(\
-#                                  './python/config/ph_q1_supe_sims.py', label)
-#plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-#simulated data only, using 50% as training
-#label = "sim data only, 50% sims. as training data"
-#pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
-#                                './python/config/ph_q1_supe_simsonly.py', label)
-#plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-
-#Test what happens when you divide peoples' reliability by radius group
-# #real data plus sims. Evaluate on real
-# label = "unsup. learning with real+sim data"
-# ip.testUnsupervised('./python/config/ph_q1_uns_plussims_rad.py', label)
-# #real data plus sims, evaluate only on sims 
-# label = "unsup. learning with real+sim data"
-# pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
-#                                     './python/config/ph_q1_uns_sims_rad.py', label)
-#real data plus sims. Eval on real. Sims as training.
-
-NEED TO MERGE THE FIXED ERRORS FILE WITH THE REAL DATA FILE TO REPLACE THE REAL_AND_SIMS GOLD FILE.
-ADD IN ANOTHER METHOD FOR COMPARISON.
-REPEAT THE 50% SIMS METHOD MULTIPLE TIMES IF NOT DONE ALREADY?
-
 label = "simulations as training data"
-pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
-                                   './python/config/ph_q1_supe_plussims_rad.py', label, eval=False)
-pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
-                          np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
-plotRecalByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
+pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised('./python/config/ph_q1_supe_plussims.py', label)
+#plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
 
-plt.figure(9)
-figure7 = 9
-plt.figure(10)
-figure8 = 10
-
-# ip.plotCumDist(pTsum,2,testIdxsReal,goldAll, label)        
-# acc,recall,spec,prec,auc,ap = \
-#     ip.getAccMeasures(pTsum,goldAll,2,testIdxsReal)
+# # plt.figure()
+# # plt.figure()
+# # plt.figure()
+# # ip.figure1 = 4
+# # ip.figure2 = 5
+# # ip.figure3 = 6
+# 
+# plt.figure(7)
+# figure7 = 7
+# plt.figure(8)
+# figure8 = 8
+# 
+# #TEST SET 2: Q1 Simulated Data Performance, all models learned using simulated and real crowd data.
+# #real data plus sims, evaluate only on sims 
+# #label = "unsup. learning with real+sim data"
+# #pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
+# #                                    './python/config/ph_q1_uns_sims.py', label)
+# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+# #sims only
+# #label = "unsup. learning with sim data only"
+# #pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
+# #                                    './python/config/ph_q1_uns_simsonly.py', label)#sims only, evaluate on sims
+# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
 # #real data plus sims. Eval on half of sims, other half as training.
-label = "real+sim data, 50% sims. as training data"
-pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
-                                   './python/config/ph_q1_supe_sims_rad.py', label, eval=False)
-pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
-                          np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
-plotRecalByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
-# #remove the real ones from the testIdxs
-# goldAll[testIdxsReal]  = -1
+# #label = "real+sim data, 50% sims. as training data"
+# #pT,goldTypes,testIdxs,goldAll,_,_ = ip.testSupervised(\
+# #                                  './python/config/ph_q1_supe_sims.py', label)
+# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+# #simulated data only, using 50% as training
+# #label = "sim data only, 50% sims. as training data"
+# #pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+# #                                './python/config/ph_q1_supe_simsonly.py', label)
+# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
 # 
-# testIdxs = np.setdiff1d(testIdxs, testIdxsReal, True)
+# #Test what happens when you divide peoples' reliability by radius group
+# # #real data plus sims. Evaluate on real
+# # label = "unsup. learning with real+sim data"
+# # ip.testUnsupervised('./python/config/ph_q1_uns_plussims_rad.py', label)
+# # #real data plus sims, evaluate only on sims 
+# # label = "unsup. learning with real+sim data"
+# # pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
+# #                                     './python/config/ph_q1_uns_sims_rad.py', label)
+# #real data plus sims. Eval on real. Sims as training.
 # 
-# goldAll[goldAll>1] = 1
-# ip.plotCumDist(pTsum,2,testIdxs,goldAll, label)        
-# acc,recall,spec,prec,auc,ap = \
-#     ip.getAccMeasures(pTsum,goldAll,2,testIdxs)
-# plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+# NEED TO MERGE THE FIXED ERRORS FILE WITH THE REAL DATA FILE TO REPLACE THE REAL_AND_SIMS GOLD FILE.
+# ADD IN ANOTHER METHOD FOR COMPARISON.
+# REPEAT THE 50% SIMS METHOD MULTIPLE TIMES IF NOT DONE ALREADY?
+# 
+# label = "simulations as training data"
+# pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+#                                    './python/config/ph_q1_supe_plussims_rad.py', label, eval=False)
+# pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
+#                           np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
+# plotRecalByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
+# 
+# plt.figure(9)
+# figure7 = 9
+# plt.figure(10)
+# figure8 = 10
+# 
+# # ip.plotCumDist(pTsum,2,testIdxsReal,goldAll, label)        
+# # acc,recall,spec,prec,auc,ap = \
+# #     ip.getAccMeasures(pTsum,goldAll,2,testIdxsReal)
+# # #real data plus sims. Eval on half of sims, other half as training.
+# label = "real+sim data, 50% sims. as training data"
+# pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+#                                    './python/config/ph_q1_supe_sims_rad.py', label, eval=False)
+# pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
+#                           np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
+# plotRecalByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
+# # #remove the real ones from the testIdxs
+# # goldAll[testIdxsReal]  = -1
+# # 
+# # testIdxs = np.setdiff1d(testIdxs, testIdxsReal, True)
+# # 
+# # goldAll[goldAll>1] = 1
+# # ip.plotCumDist(pTsum,2,testIdxs,goldAll, label)        
+# # acc,recall,spec,prec,auc,ap = \
+# #     ip.getAccMeasures(pTsum,goldAll,2,testIdxs)
+# # plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
