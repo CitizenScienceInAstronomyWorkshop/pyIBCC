@@ -8,9 +8,10 @@ The directory "python" contains the current working implementation of IBCC. The 
 The required sample datasets and config files for some Galaxy Zoo CANDELS tests are in the repo.
 
 To run the main Galaxy Zoo CANDELS test do:
+
 	cd .../pyIBCC/python
     python ibcc.py config/galaxy-zoo-candels-test-full-500.py
-	
+
 This example uses 731998 Q1 (smooth/features/other) classifications
 from the 500 most active classifiers. It takes less than a minute and
 seems to produce meaningful results, although I have only glanced over
