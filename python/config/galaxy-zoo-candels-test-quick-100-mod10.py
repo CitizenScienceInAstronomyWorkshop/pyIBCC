@@ -3,7 +3,7 @@ import numpy as np
 print 'Configuring IBCC'
 
 folder = 'galaxy-zoo-candels-test'
-label = '_quick_100'
+label = '_quick_100_mod10'
 
 scores = [0,1,2]
 nScores = len(scores)
