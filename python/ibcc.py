@@ -39,14 +39,17 @@ class Ibcc(object):
         sumET = np.sum(self.ET[self.obsIdxs,:], 0)
         for j in range(self.nClasses):
             self.nu[j] = self.nu0[j] + sumET[j]
-        self.initLnKappa()
+        self.lnKappa = psi(self.nu) - psi(np.sum(self.nu))
        
     def expecLnPi(self):#Posterior Hyperparams
         for j in range(self.nClasses):
             for l in range(self.nScores):
                 counts = np.matrix(self.ET[:,j]) * self.C[l]
                 self.alpha[j,l,:] = self.alpha0[j,l] + counts
-        self.initLnPi()   
+        sumAlpha = np.sum(self.alpha, 1)
+        psiSumAlpha = psi(sumAlpha)
+        for s in range(self.nScores):        
+            self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha
         
     def lnjoint_table(self):
         lnjoint = np.zeros((self.nObjs, self.nClasses), np.float)
@@ -197,7 +200,7 @@ class Ibcc(object):
             #and training data is often insufficient -> could lead to biased result 
 
             #update targets
-            lnjoint = self.expecT()
+            lnjoint = self.expecT() 
 
             #update params
             self.expecLnKappa()
@@ -230,12 +233,16 @@ class Ibcc(object):
         self.initLnKappa()
         
     def initLnKappa(self):
-        self.nu = deepcopy(self.nu0)
+        if self.nu!=[]:
+            return
+        self.nu = deepcopy(np.float64(self.nu0))
         sumNu = np.sum(self.nu)
         self.lnKappa = psi(self.nu) - psi(sumNu)
         
     def initLnPi(self):
-        self.alpha = self.alpha0[:,:,np.newaxis].astype(np.float)
+        if self.alpha!=[]:
+            return
+        self.alpha = np.float64(self.alpha0[:,:,np.newaxis])
         self.alpha = np.repeat(self.alpha, self.K, axis=2)        
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
@@ -447,6 +454,11 @@ def loadData(configFile):
         trainIds = tIdxMap[trainIds,0].todense()
     
     return K,tableFormat,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes             
+
+def loadCombiner(configFile):
+    K,tableFormat,crowdLabels,gold,origCandIds,trIdxs,outputFile,confMatFile,goldTypes = loadData(configFile)
+    combiner = initFromConfig(configFile, K, tableFormat)
+    return combiner, crowdLabels, gold, origCandIds, trIdxs,outputFile,confMatFile,goldTypes
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file

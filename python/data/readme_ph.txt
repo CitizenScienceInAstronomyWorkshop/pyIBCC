@@ -1,0 +1,1 @@
+For the planet hunters gold data, the label -1 indicates no confirmed class, 0 would indicate confirmed as not interesting, 1 indicates confirmed planets, 2 indicates eclipsing binaries. It is hard to distinguish 1 and 2. To evaluate the results, it's best to look at the true positive rate for class 1 and ignore class 2. We can't evaluate the false positive rate though.  
