@@ -52,7 +52,7 @@ class Ibcc(object):
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha
         
     def lnjoint_table(self):
-        lnjoint = np.zeros((self.nObjs, self.nClasses))
+        lnjoint = np.zeros((self.nObjs, self.nClasses), np.float)
         agentIdx = np.tile(np.transpose(range(self.K)), (self.nObjs,1)) 
     
         for j in range(self.nClasses):
@@ -60,7 +60,7 @@ class Ibcc(object):
         return lnjoint
         
     def lnjoint_sparseList(self):
-        lnjoint = np.zeros((self.nObjs, self.nClasses))
+        lnjoint = np.zeros((self.nObjs, self.nClasses), np.float)
         for j in range(self.nClasses):
             data = self.lnPi[j,self.crowdLabels[:,2],self.crowdLabels[:,0]].reshape(-1)
             rows = self.crowdLabels[:,1].reshape(-1)
@@ -78,8 +78,8 @@ class Ibcc(object):
 
     def expecT(self):
         
-        self.ET = np.zeros((self.nObjs, self.nClasses))
-        pT = joint = np.zeros((self.nObjs, self.nClasses))
+        self.ET = np.zeros((self.nObjs, self.nClasses), np.float)
+        pT = joint = np.zeros((self.nObjs, self.nClasses), np.float)
         lnjoint = self.lnjoint()
             
         #ensure that the values are not too small
@@ -246,7 +246,8 @@ class Ibcc(object):
         self.alpha = np.repeat(self.alpha, self.K, axis=2)        
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
-        self.lnPi = np.zeros((self.nClasses,self.nScores,self.K))
+        self.lnPi = np.zeros((self.nClasses,self.nScores,self.K),
+                             np.float)
         for s in range(self.nScores):        
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha 
         
@@ -280,7 +281,8 @@ def loadCrowdLabels(inputFile, scores):
         print 'Will try to load a CSV file...'
     
         crowdLabels = np.genfromtxt(inputFile, delimiter=',', \
-                                skip_header=1,usecols=[0,1,2])
+                                skip_header=1,usecols=[0,1,2],
+                                dtype=np.int)
 
         tIdxs, crowdLabels[:,1] = np.unique(crowdLabels[:,1],return_inverse=True)
         kIdxs, crowdLabels[:,0] = np.unique(crowdLabels[:,0],return_inverse=True)
@@ -303,7 +305,7 @@ def loadCrowdLabels(inputFile, scores):
                 pickle.dump((crowdLabels,tIdxs,K), outFile)
         except Exception:
             print 'Could not save the input data as a Python object file.'
-    
+
     return crowdLabels, tIdxMap, tIdxs, K, len(tIdxs)
     
 def loadCrowdTable(inputFile, scores):
@@ -463,11 +465,15 @@ def saveTargets(pT, tIdxs, outputFile):
     print 'writing results to file'
     
     print 'Posterior matrix: ' + str(pT.shape)
-    tIdxs = np.reshape(tIdxs, (len(tIdxs),1))
     print 'Target indexes: ' + str(tIdxs.shape)
-    
-    np.savetxt(outputFile, np.concatenate([tIdxs, pT], 1))
 
+    with file(outputFile, 'w') as f:
+        for idx, classifier_id in enumerate(tIdxs):
+            line = '{:10.0f}'.format(classifier_id)
+            line += ' {:7.5f}'*pT.shape[1] + '\n'
+            line = line.format(*pT[idx])
+            f.write(line)
+    
 def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
     #write confusion matrices to file if required
     if not confMatFile is None:
@@ -501,4 +507,3 @@ if __name__ == '__main__':
     else:
         configFile = './config/my_project.py'
     runIbcc(configFile)
-    
