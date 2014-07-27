@@ -41,11 +41,14 @@ class Ibcc(object):
             self.nu[j] = self.nu0[j] + sumET[j]
         self.lnKappa = psi(self.nu) - psi(np.sum(self.nu))
        
-    def expecLnPi(self):#Posterior Hyperparams
+    def postAlpha(self):#Posterior Hyperparams -- move back to static IBCC
         for j in range(self.nClasses):
             for l in range(self.nScores):
                 counts = np.matrix(self.ET[:,j]) * self.C[l]
                 self.alpha[j,l,:] = self.alpha0[j,l] + counts
+       
+    def expecLnPi(self):#Posterior Hyperparams
+        self.postAlpha()
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         for s in range(self.nScores):        

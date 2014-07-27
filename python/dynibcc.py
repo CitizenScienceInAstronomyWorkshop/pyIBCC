@@ -12,12 +12,6 @@ import ibcc
 class Dynibcc(Ibcc):
         
     Tau = 1 # the total number of responses from all crowd members
-       
-    #def postAlpha(self):#Posterior Hyperparams -- move back to static IBCC
-        #for j in range(self.nClasses):
-            #for l in range(self.nScores):
-                #counts = np.matrix(self.ET[:,j]) * self.C[l]
-                #self.alpha[j,l,:] = self.alpha0[j,l] + counts
 
     def postAlpha(self):#Posterior Hyperparams        
         if self.nClasses>2:
