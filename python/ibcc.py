@@ -45,7 +45,7 @@ class Ibcc(object):
         for j in range(self.nClasses):
             for l in range(self.nScores):
                 counts = np.matrix(self.ET[:,j]) * self.C[l]
-                self.alpha[j,l,:] = self.alpha0[j,l] + counts
+                self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         for s in range(self.nScores):        
@@ -121,9 +121,9 @@ class Ibcc(object):
         #lnjoint[self.trainT!=-1,:] -= np.reshape(self.lnKappa, (1,self.nClasses))
         lnpCT = self.postLnJoint(lnjoint)                    
                         
-        alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, 1))
-        lnpPi = gammaln(np.sum(alpha0, 1))-np.sum(gammaln(alpha0),1) \
-                    + np.sum(np.multiply(alpha0-1, self.lnPi), 1)
+        #alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, self.K))
+        lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
+                    + np.sum(np.multiply(self.alpha0-1, self.lnPi), 1)
         lnpPi = np.sum(np.sum(lnpPi))
             
         lnpKappa = self.postLnKappa()
@@ -242,8 +242,11 @@ class Ibcc(object):
     def initLnPi(self):
         if self.alpha!=[]:
             return
-        self.alpha = np.float64(self.alpha0[:,:,np.newaxis])
-        self.alpha = np.repeat(self.alpha, self.K, axis=2)        
+        if len(self.alpha0.shape)<3:
+            self.alpha0 = np.float64(self.alpha0[:,:,np.newaxis])
+            self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
+        self.alpha = deepcopy(np.float64(self.alpha0))#np.float64(self.alpha0[:,:,np.newaxis])
+        #self.alpha = np.repeat(self.alpha, self.K, axis=2)        
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         self.lnPi = np.zeros((self.nClasses,self.nScores,self.K))
