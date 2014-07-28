@@ -41,11 +41,14 @@ class Ibcc(object):
             self.nu[j] = self.nu0[j] + sumET[j]
         self.lnKappa = psi(self.nu) - psi(np.sum(self.nu))
        
-    def expecLnPi(self):#Posterior Hyperparams
+    def postAlpha(self):#Posterior Hyperparams -- move back to static IBCC
         for j in range(self.nClasses):
             for l in range(self.nScores):
                 counts = np.matrix(self.ET[:,j]) * self.C[l]
-                self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
+                self.alpha[j,l,:] = self.alpha0[j,l] + counts
+       
+    def expecLnPi(self):#Posterior Hyperparams
+        self.postAlpha()
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         for s in range(self.nScores):        
@@ -115,6 +118,10 @@ class Ibcc(object):
                         + np.sum(np.multiply(self.nu-1,self.lnKappa))
         return lnqKappa
     
+    def qLnT(self):
+        ET = self.ET[self.ET!=0]
+        return np.sum( np.multiply( ET,np.log(ET) ) )
+        
     def lowerBound(self, lnjoint):
                         
         #probability of these targets is 1 as they are training labels
@@ -130,8 +137,7 @@ class Ibcc(object):
             
         EEnergy = lnpCT + lnpPi + lnpKappa
         
-        ET = self.ET[self.ET!=0]
-        lnqT = np.sum( np.multiply( ET,np.log(ET) ) )
+        lnqT = self.qLnT()
 
         lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
                     np.sum( np.multiply(self.alpha-1,self.lnPi), 1)
@@ -246,7 +252,7 @@ class Ibcc(object):
             self.alpha0 = np.float64(self.alpha0[:,:,np.newaxis])
             self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
         self.alpha = deepcopy(np.float64(self.alpha0))#np.float64(self.alpha0[:,:,np.newaxis])
-        #self.alpha = np.repeat(self.alpha, self.K, axis=2)        
+
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         self.lnPi = np.zeros((self.nClasses,self.nScores,self.K))
