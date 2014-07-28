@@ -44,7 +44,7 @@ class Ibcc(object):
     def postAlpha(self):#Posterior Hyperparams -- move back to static IBCC
         for j in range(self.nClasses):
             for l in range(self.nScores):
-                counts = np.matrix(self.ET[:,j]) * self.C[l]
+                counts = self.ET[:,j].dot(self.C[l])
                 self.alpha[j,l,:] = self.alpha0[j,l] + counts
        
     def expecLnPi(self):#Posterior Hyperparams
@@ -93,7 +93,7 @@ class Ibcc(object):
         joint = np.exp(joint)
         norma = np.sum(joint, axis=1)
         for j in range(self.nClasses):
-            pT[:,j] = np.divide(joint[:,j], norma)
+            pT[:,j] = joint[:,j]/norma
             self.ET[:,j] = pT[:,j]
             
         for j in range(self.nClasses):            
@@ -105,22 +105,22 @@ class Ibcc(object):
         return lnjoint
       
     def postLnJoint(self, lnjoint):
-        lnpCT = np.sum(np.sum( np.multiply(lnjoint, self.ET) ))                        
+        lnpCT = np.sum(np.sum( lnjoint*self.ET ))                        
         return lnpCT      
             
     def postLnKappa(self):
         lnpKappa = gammaln(np.sum(self.nu0))-np.sum(gammaln(self.nu0)) \
-                    + sum(np.multiply(self.nu0-1,self.lnKappa))
+                    + sum(self.nu0-1*self.lnKappa)
         return lnpKappa
         
     def qLnKappa(self):
         lnqKappa = gammaln(np.sum(self.nu))-np.sum(gammaln(self.nu)) \
-                        + np.sum(np.multiply(self.nu-1,self.lnKappa))
+                        + np.sum(self.nu-1*self.lnKappa)
         return lnqKappa
     
     def qLnT(self):
         ET = self.ET[self.ET!=0]
-        return np.sum( np.multiply( ET,np.log(ET) ) )
+        return np.sum( ET*np.log(ET) )
         
     def lowerBound(self, lnjoint):
                         
@@ -130,7 +130,7 @@ class Ibcc(object):
                         
         #alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, self.K))
         lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
-                    + np.sum(np.multiply(self.alpha0-1, self.lnPi), 1)
+                    + np.sum(self.alpha0-1*self.lnPi, 1)
         lnpPi = np.sum(np.sum(lnpPi))
             
         lnpKappa = self.postLnKappa()
@@ -140,7 +140,7 @@ class Ibcc(object):
         lnqT = self.qLnT()
 
         lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
-                    np.sum( np.multiply(self.alpha-1,self.lnPi), 1)
+                    np.sum( self.alpha-1*self.lnPi, 1)
         lnqPi = np.sum(np.sum(lnqPi))        
             
         lnqKappa = self.qLnKappa()
@@ -162,10 +162,11 @@ class Ibcc(object):
         self.nObjs = trainT.shape[0]        
         
     def preprocessCrowdLabels(self, crowdLabels):
+        crowdLabels = np.array(crowdLabels) #ensure we don't have a matrix by mistake
         C = {}
         if crowdLabels.shape[1]!=3 or self.crowdTable != None:            
             for l in range(self.nScores):
-                Cl = np.matrix(np.zeros(crowdLabels.shape))
+                Cl = np.zeros(crowdLabels.shape)
                 Cl[crowdLabels==l] = 1
                 C[l] = Cl
             self.crowdTable = crowdLabels
@@ -261,7 +262,7 @@ class Ibcc(object):
         
     def initT(self):        
         kappa = self.nu / np.sum(self.nu, axis=0)        
-        self.ET = np.matrix(np.zeros((self.nObjs,self.nClasses))) + kappa  
+        self.ET = np.zeros((self.nObjs,self.nClasses)) + kappa  
         
     def __init__(self, nClasses, nScores, alpha0, nu0, K, tableFormat=False):
         self.nClasses = nClasses
@@ -483,7 +484,7 @@ def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
         print 'writing confusion matrices to file'
         pi = alpha
         for l in range(nScores):
-            pi[:,l,:] = np.divide(alpha[:,l,:], np.sum(alpha,1) )
+            pi[:,l,:] = alpha[:,l,:]/np.sum(alpha,1)
         
         flatPi = pi.reshape(1, nClasses*nScores, K)
         flatPi = np.swapaxes(flatPi, 0, 2)
