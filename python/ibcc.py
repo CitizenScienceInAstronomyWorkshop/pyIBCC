@@ -118,6 +118,10 @@ class Ibcc(object):
                         + np.sum(np.multiply(self.nu-1,self.lnKappa))
         return lnqKappa
     
+    def qLnT(self):
+        ET = self.ET[self.ET!=0]
+        return np.sum( np.multiply( ET,np.log(ET) ) )
+        
     def lowerBound(self, lnjoint):
                         
         #probability of these targets is 1 as they are training labels
@@ -133,8 +137,7 @@ class Ibcc(object):
             
         EEnergy = lnpCT + lnpPi + lnpKappa
         
-        ET = self.ET[self.ET!=0]
-        lnqT = np.sum( np.multiply( ET,np.log(ET) ) )
+        lnqT = self.qLnT()
 
         lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
                     np.sum( np.multiply(self.alpha-1,self.lnPi), 1)
@@ -245,7 +248,10 @@ class Ibcc(object):
     def initLnPi(self):
         if self.alpha!=[]:
             return
-        self.alpha = np.float64(self.alpha0[:,:,np.newaxis])
+        if len(self.alpha0.shape)<3:
+            self.alpha = np.float64(self.alpha0[:,:,np.newaxis])
+        else:
+            self.alpha = np.float64(self.alpha0)
         self.alpha = np.repeat(self.alpha, self.K, axis=2)        
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
