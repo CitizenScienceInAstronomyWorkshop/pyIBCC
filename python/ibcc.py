@@ -110,12 +110,12 @@ class Ibcc(object):
             
     def postLnKappa(self):
         lnpKappa = gammaln(np.sum(self.nu0))-np.sum(gammaln(self.nu0)) \
-                    + sum(self.nu0-1*self.lnKappa)
+                    + sum((self.nu0-1)*self.lnKappa)
         return lnpKappa
         
     def qLnKappa(self):
         lnqKappa = gammaln(np.sum(self.nu))-np.sum(gammaln(self.nu)) \
-                        + np.sum(self.nu-1*self.lnKappa)
+                        + np.sum((self.nu-1)*self.lnKappa)
         return lnqKappa
     
     def qLnT(self):
@@ -130,7 +130,7 @@ class Ibcc(object):
                         
         #alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, self.K))
         lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
-                    + np.sum(self.alpha0-1*self.lnPi, 1)
+                    + np.sum((self.alpha0-1)*self.lnPi, 1)
         lnpPi = np.sum(np.sum(lnpPi))
             
         lnpKappa = self.postLnKappa()
@@ -140,7 +140,7 @@ class Ibcc(object):
         lnqT = self.qLnT()
 
         lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
-                    np.sum( self.alpha-1*self.lnPi, 1)
+                    np.sum( (self.alpha-1)*self.lnPi, 1)
         lnqPi = np.sum(np.sum(lnqPi))        
             
         lnqKappa = self.qLnKappa()
