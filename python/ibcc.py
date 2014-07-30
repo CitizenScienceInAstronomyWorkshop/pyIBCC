@@ -44,7 +44,8 @@ class Ibcc(object):
     def postAlpha(self):#Posterior Hyperparams -- move back to static IBCC
         for j in range(self.nClasses):
             for l in range(self.nScores):
-                counts = self.ET[:,j].dot(self.C[l])
+                Tj = self.ET[:,j].reshape((self.nObjs,1))
+                counts = self.C[l].T.dot(Tj).reshape(-1)
                 self.alpha[j,l,:] = self.alpha0[j,l] + counts
        
     def expecLnPi(self):#Posterior Hyperparams
@@ -482,7 +483,7 @@ def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
     #write confusion matrices to file if required
     if not confMatFile is None:
         print 'writing confusion matrices to file'
-        pi = alpha
+        pi = np.zeros((nClasses,nScores,K))
         for l in range(nScores):
             pi[:,l,:] = alpha[:,l,:]/np.sum(alpha,1)
         
