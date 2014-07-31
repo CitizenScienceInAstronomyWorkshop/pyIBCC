@@ -46,7 +46,7 @@ class Ibcc(object):
             for l in range(self.nScores):
                 Tj = self.ET[:,j].reshape((self.nObjs,1))
                 counts = self.C[l].T.dot(Tj).reshape(-1)
-                self.alpha[j,l,:] = self.alpha0[j,l] + counts
+                self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
        
     def expecLnPi(self):#Posterior Hyperparams
         self.postAlpha()
