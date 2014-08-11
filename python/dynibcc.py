@@ -4,12 +4,21 @@
 import sys
 import numpy as np
 from copy import deepcopy
-from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
-import pickle
 import ibcc
 
-class Dynibcc(Ibcc):
+def state_to_alpha(logodds, var):
+    alpha1 = 1/var * (1+np.exp(logodds))
+    alpha2 = alpha1 * (1+np.exp(-logodds))
+    return alpha1, alpha2
+
+def alpha_to_state(alpha):
+    Wmean = np.log(alpha)-np.log(np.sum(alpha,axis=2)-alpha)
+    P = np.diag( (1/alpha) + \
+        (1/(np.sum(alpha,axis=2)-alpha)) )
+    return Wmean, P
+
+class Dynibcc(ibcc.Ibcc):
         
     Tau = 1 # the total number of responses from all crowd members
 
@@ -19,17 +28,6 @@ class Dynibcc(Ibcc):
                 self.postAlpha_binary(l)
         else:
             self.postAlpha_binary(1)
-    
-    def state_to_alpha(logodds, var):
-        alpha1 = 1/var * (1+np.exp(logodds))
-        alpha2 = alpha1 * (1+np.exp(-logodds))
-        return alpha1, alpha2
-    
-    def alpha_to_state(alpha):
-        Wmean = np.log(alpha[:,l,tau])-np.log(np.sum(alpha[:,:,tau],axis=2)-alpha[:,l,tau])
-        P = np.diag( (1/alpha[:,l,tau]) + \
-            (1/(np.sum(alpha[:,:,tau],axis=2)-alpha[:,l,tau])) )
-        return Wmean, P
     
     def postAlpha_binary(self, l=1):
         #l is the index into alpha we are dealing with
@@ -44,7 +42,7 @@ class Dynibcc(Ibcc):
         eta_pr = np.zeros(self.Tau)
         r_pr = np.zeros(self.Tau)
         
-        self.Kal = np.zeros((self.nClasses, self.Tau))
+        Kalman = np.zeros((self.nClasses, self.Tau))
         
         for tau in range(self.Tau): 
             k = self.crowdLabels[tau,0]
@@ -142,8 +140,8 @@ class Dynibcc(Ibcc):
         #alpha0 then refers to the prior at each step.
         # !!! Does it need reshaping?
         #alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, 1))
-        lnpPi = gammaln(np.sum(alpha0, 1))-np.sum(gammaln(alpha0),1) \
-                    + np.sum((alpha0-1)*self.lnPi, 1)
+        lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
+                    + np.sum((self.alpha0-1)*self.lnPi, 1)
         lnpPi = np.sum(np.sum(lnpPi))
             
         lnpKappa = self.postLnKappa()
@@ -166,7 +164,7 @@ class Dynibcc(Ibcc):
         return L
          
     def preprocessCrowdLabels(self, crowdLabels):
-        Ibcc.preprocessCrowdLabels(self,crowdLabels)
+        super(Dynibcc,self).preprocessCrowdLabels(self,crowdLabels)
         
         if self.crowdTable != None:
             self.Tau = self.crowdTable.shape[0] * self.crowdTable.shape[1]
