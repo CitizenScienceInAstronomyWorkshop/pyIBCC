@@ -232,7 +232,7 @@ def initFromConfig(configFile, K, tableFormat=False):
     
     return combiner
 
-def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
+def save_pi(alpha, nClasses, nScores, K, confMatFile):
     #TODO update this to dynamic matrices?
     #write confusion matrices to file if required
     if not confMatFile is None:

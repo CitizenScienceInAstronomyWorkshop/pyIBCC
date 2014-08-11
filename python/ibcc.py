@@ -1,12 +1,11 @@
 '''
 @author: Edwin Simpson
 '''
-import sys
+import sys, pickle, logging
 import numpy as np
 from copy import deepcopy
 from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
-import pickle
 
 class Ibcc(object):
     
@@ -34,6 +33,8 @@ class Ibcc(object):
     ET = []
     
     obsIdxs = []
+    
+    keeprunning = True # set to false causes the combineClassifications method to exit without completing
 
     def expecLnKappa(self):#Posterior Hyperparams
         sumET = np.sum(self.ET[self.obsIdxs,:], 0)
@@ -149,7 +150,7 @@ class Ibcc(object):
         H = - lnqT - lnqPi - lnqKappa
         L = EEnergy + H
         
-        #print 'EEnergy ' + str(EEnergy) + ', H ' + str(H)
+        #logging.debug('EEnergy ' + str(EEnergy) + ', H ' + str(H))
         return L
         
     def preprocessTraining(self, crowdLabels, trainT=None):
@@ -163,7 +164,9 @@ class Ibcc(object):
         self.nObjs = trainT.shape[0]        
         
     def preprocessCrowdLabels(self, crowdLabels):
-        crowdLabels = np.array(crowdLabels) #ensure we don't have a matrix by mistake
+        #ensure we don't have a matrix by mistake
+        if not isinstance(crowdLabels, np.ndarray):
+            crowdLabels = np.array(crowdLabels)
         C = {}
         if crowdLabels.shape[1]!=3 or self.crowdTable != None:            
             for l in range(self.nScores):
@@ -171,7 +174,7 @@ class Ibcc(object):
                 Cl[crowdLabels==l] = 1
                 C[l] = Cl
             self.crowdTable = crowdLabels
-            self.obsIdxs = np.argwhere(np.sum(crowdLabels,axis=1)>=0)
+            self.obsIdxs = np.argwhere(np.sum(crowdLabels,axis=1)>=0)             
         else:            
             for l in range(self.nScores):
                 lIdxs = np.where(crowdLabels[:,2]==l)[0]     
@@ -183,22 +186,31 @@ class Ibcc(object):
             self.crowdLabels = crowdLabels
             self.obsIdxs = np.unique(crowdLabels[:1])
         self.C = C
-
+        
+    def initK(self, crowdLabels):
+        if self.crowdTable != None:
+            newK = self.crowdTable.shape[1]
+        else:
+            newK = np.max(crowdLabels[:,0])
+        if self.K<=newK:
+            self.K = newK+1 #+1 since we start from 0
+            self.initParams() 
     
     def combineClassifications(self, crowdLabels, trainT=None):
         
         self.preprocessTraining(crowdLabels, trainT)
         self.initT()
         
-        print 'Combining...'
+        logging.info('IBCC Combining...')
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
         
         crowdLabels = crowdLabels.astype(int)
+        self.initK(crowdLabels)
         self.preprocessCrowdLabels(crowdLabels)
         
-        while not converged:
+        while not converged and self.keeprunning:
             oldET = self.ET
             #play around with the order you start these in:
             #Either update the params using the priors+training labels for t
@@ -217,27 +229,31 @@ class Ibcc(object):
             #check convergence        
             if self.useLowerBound:
                 L = self.lowerBound(lnjoint)
-                #print 'Lower bound: ' + str(L) + ', increased by ' + str(L-oldL)
+                logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L-oldL))
                 change = L-oldL                
-                if L-oldL<0:
-                    print 'Possible error -> lower bound went down. Maybe rounding error?'
                 oldL = L
             else:
                 change = np.sum(np.sum(np.absolute(oldET - self.ET)))            
             if (self.nIts>=self.maxNoIts or change<self.convThreshold) and self.nIts>self.minNoIts:
                 converged = True
             self.nIts+=1
-            print 'Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change)
+            if change<0:
+                logging.warning('Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
+            else:
+                logging.debug('Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
+               
+            import gc
+            gc.collect()               
                 
-        print 'IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.maxNoIts) + ').'
+        logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.maxNoIts) + ').')
         return self.ET
         
     def initParams(self):
-        print 'Initialising parameters...' 
-        print 'Alpha0: ' + str(self.alpha0)
+        logging.debug('Initialising parameters...') 
+        logging.debug('Alpha0: ' + str(self.alpha0))
         self.initLnPi()
         
-        print 'Nu0: ' + str(self.nu0)
+        logging.debug('Nu0: ' + str(self.nu0))
         self.initLnKappa()
         
     def initLnKappa(self):
@@ -248,11 +264,19 @@ class Ibcc(object):
         self.lnKappa = psi(self.nu) - psi(sumNu)
         
     def initLnPi(self):
-        if self.alpha!=[]:
+        if self.alpha!=[] and self.alpha.shape[2]==self.K:
             return
         if len(self.alpha0.shape)<3:
-            self.alpha0 = np.float64(self.alpha0[:,:,np.newaxis])
+            self.alpha0 = np.array(self.alpha0[:,:,np.newaxis], dtype=np.float64)
             self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
+        oldK = self.alpha0.shape[2] 
+        if oldK<self.K:
+            nnew = self.K - oldK
+            alpha0new = self.alpha0[:,:,0]
+            alpha0new = alpha0new[:,:,np.newaxis]
+            alpha0new = np.repeat(alpha0new, nnew, axis=2)
+            self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
+            
         self.alpha = deepcopy(np.float64(self.alpha0))#np.float64(self.alpha0[:,:,np.newaxis])
 
         sumAlpha = np.sum(self.alpha, 1)
@@ -288,7 +312,7 @@ def loadCrowdLabels(inputFile, scores):
             crowdLabels, tIdxs, K = pickle.load(inFile)
             pyFileExists = True
     except Exception:
-        print 'Will try to load a CSV file...'
+        logging.info('Will try to load a CSV file...')
     
         crowdLabels = np.genfromtxt(inputFile, delimiter=',', \
                                 skip_header=1,usecols=[0,1,2])
@@ -313,7 +337,7 @@ def loadCrowdLabels(inputFile, scores):
             with open(inputFile+'.dat', 'wb') as outFile:
                 pickle.dump((crowdLabels,tIdxs,K), outFile)
         except Exception:
-            print 'Could not save the input data as a Python object file.'
+            logging.error('Could not save the input data as a Python object file.')
     
     return crowdLabels, tIdxMap, tIdxs, K, len(tIdxs)
     
@@ -344,7 +368,7 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):
     
     import os.path
     if not os.path.isfile(goldFile):
-        print 'No gold labels found.'
+        logging.warning('No gold labels found.')
         gold = np.zeros(nObjs) -1
         return gold, None
     
@@ -360,7 +384,7 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):
         
     if np.any(np.isnan(gold[0])): #skip header if necessary
         gold = gold[1:,:]
-    print "gold shape: " + str(gold.shape)
+    logging.debug("gold shape: " + str(gold.shape))
     
     if len(gold.shape)==1 or gold.shape[1]==1:
         goldLabels = gold
@@ -430,7 +454,7 @@ def loadData(configFile):
     scores = np.array([3, 4])
     
     outputFile =  './output/output.csv'
-    confMatFile = './output/confMat.csv'
+    confMatFile = None#'./output/confMat.csv'
     classLabels = None
   
     trainIds = None #IDs of targets that should be used as training data. Optional 
@@ -471,18 +495,16 @@ def loadCombiner(configFile):
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file
-    print 'writing results to file'
-    
-    print 'Posterior matrix: ' + str(pT.shape)
+    logging.info('writing results to file')
+    logging.debug('Posterior matrix: ' + str(pT.shape))
     tIdxs = np.reshape(tIdxs, (len(tIdxs),1))
-    print 'Target indexes: ' + str(tIdxs.shape)
-    
+    logging.debug('Target indexes: ' + str(tIdxs.shape))    
     np.savetxt(outputFile, np.concatenate([tIdxs, pT], 1))
 
-def saveAlpha(alpha, nClasses, nScores, K, confMatFile):
+def save_pi(alpha, nClasses, nScores, K, confMatFile):
     #write confusion matrices to file if required
     if not confMatFile is None:
-        print 'writing confusion matrices to file'
+        logging.info('writing confusion matrices to file')
         pi = np.zeros((nClasses,nScores,K))
         for l in range(nScores):
             pi[:,l,:] = alpha[:,l,:]/np.sum(alpha,1)
@@ -501,7 +523,7 @@ def runIbcc(configFile):
     if outputFile != None:
         saveTargets(pT, tIdxs, outputFile)
     if confMatFile != None:
-        saveAlpha(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
+        save_pi(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
     
     return pT, combiner
     
