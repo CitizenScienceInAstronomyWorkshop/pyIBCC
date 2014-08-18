@@ -7,6 +7,8 @@ from copy import deepcopy
 from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
 
+logging.basicConfig(level='INFO')
+
 class Ibcc(object):
     
     useLowerBound = True #may be quicker not to calculate this
@@ -321,7 +323,7 @@ def loadCrowdLabels(inputFile, scores):
         tIdxs, crowdLabels[:,1] = np.unique(crowdLabels[:,1],return_inverse=True)
         kIdxs, crowdLabels[:,0] = np.unique(crowdLabels[:,0],return_inverse=True)
         K = len(kIdxs)
-        
+
     unmappedScores = np.round(crowdLabels[:,2])
     for i,s in enumerate(scores):
         crowdLabels[(unmappedScores==s),2] = i
@@ -498,7 +500,6 @@ def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file
     logging.info('writing results to file')
     logging.debug('Posterior matrix: ' + str(pT.shape))
-    tIdxs = np.reshape(tIdxs, (len(tIdxs),1))
     logging.debug('Target indexes: ' + str(tIdxs.shape))
     with file(outputFile, 'w') as f:
         for idx, classifier_id in enumerate(tIdxs):
