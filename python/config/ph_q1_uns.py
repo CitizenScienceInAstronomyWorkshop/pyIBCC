@@ -1,4 +1,5 @@
 import numpy as np
+from python.config.ph_q1_supe_plussims import goldTypeCol
 
 print 'Configuring IBCC'
 
@@ -19,5 +20,7 @@ confMatFile = './output/ph/confMat.csv'
 classLabels=None#do this conversion in a spreadsheet due to bugs['candidate','planet','eb','simulation']
 alpha0 = np.array([[199, 200], [200, 199]]) #for PH data
 nu0 = np.array([10.0, 10.0])
+
+goldTypeCol = 3
 
 print 'Planet hunters 2-class config done.'

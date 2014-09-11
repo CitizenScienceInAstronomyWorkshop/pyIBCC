@@ -27,6 +27,6 @@ try:
 except Exception:
     trainIds = np.genfromtxt(trainIdFile, delimiter=',', skip_header=1)
 
-goldTypeCol = -1
+goldTypeCol = 3
 
 print 'Planet hunters 2-class config done.'

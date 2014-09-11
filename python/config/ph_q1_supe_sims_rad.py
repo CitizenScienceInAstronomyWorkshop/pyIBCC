@@ -30,6 +30,6 @@ except Exception:
 print 'moving to the x validation code would be good. Remove the trainIds entirely and call xvalidation instead of runSupervised'
 trainIds = trainIds[np.random.randint(0,len(trainIds),len(trainIds)/2)]
 
-goldTypeCol = -1
+goldTypeCol = 3
 
 print 'Planet hunters 2-class config done.'

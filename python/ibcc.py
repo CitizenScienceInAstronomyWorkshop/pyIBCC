@@ -339,7 +339,7 @@ def loadCrowdLabels(inputFile, scores):
         except Exception:
             logging.error('Could not save the input data as a Python object file.')
     
-    return crowdLabels, tIdxMap, tIdxs, K, len(tIdxs)
+    return crowdLabels, tIdxMap, tIdxs, K, len(tIdxs), np.max(tIdxs)
     
 def loadCrowdTable(inputFile, scores):
     '''
@@ -362,9 +362,9 @@ def loadCrowdTable(inputFile, scores):
     
     tIdxMap = coo_matrix(( tIdxs, (tIdxs,blanks)), shape=(maxT+1,1) )
     tIdxMap = tIdxMap.tocsr()
-    return (crowdTable, tIdxMap, tIdxs, K, len(tIdxs))  
+    return (crowdTable, tIdxMap, tIdxs, K, len(tIdxs)), N
     
-def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):   
+def loadGold(goldFile, tIdxMap, nObjs, maxOrigIdx, classLabels=None, secondaryTypeCol=-1):   
     
     import os.path
     if not os.path.isfile(goldFile):
@@ -386,19 +386,19 @@ def loadGold(goldFile, tIdxMap, nObjs, classLabels=None, secondaryTypeCol=-1):
         gold = gold[1:,:]
     logging.debug("gold shape: " + str(gold.shape))
     
-    if len(gold.shape)==1 or gold.shape[1]==1:
+    if len(gold.shape)==1 or gold.shape[1]==1: #position in this list --> id of data point
         goldLabels = gold
-    else:
-        goldLabels = gold[:,1]
+    else: # sparse format: first column is id of data point, second column is gold label value
         
-        goldIdxs = gold[:,0]
         #map the original idxs to local idxs
+        valid_gold_idxs = np.argwhere(gold[:,0]<=maxOrigIdx)
+        gold = gold[valid_gold_idxs.reshape(-1),:]
+        goldIdxs = gold[:,0]
         goldIdxs = tIdxMap[goldIdxs,0].todense()
         
         #create an array for gold for all the objects/data points in this test set
-        goldSorted = np.zeros(nObjs) -1
-        goldSorted[goldIdxs] = gold[:,1]
-        goldLabels = goldSorted
+        goldLabels = np.zeros(nObjs) -1
+        goldLabels[goldIdxs] = gold[:,1]
         
         #if there is secondary type info, create a similar array for this
         if secondaryTypeCol>-1:
@@ -473,12 +473,12 @@ def loadData(configFile):
 
     #load labels from crowd
     if tableFormat:
-        (crowdLabels, tIdxMap, tIdxs, K, nObjs) = loadCrowdTable(inputFile, scores)
+        crowdLabels, tIdxMap, tIdxs, K, nObjs, maxOrigIdx = loadCrowdTable(inputFile, scores)
     else:
-        (crowdLabels, tIdxMap, tIdxs, K, nObjs) = loadCrowdLabels(inputFile, scores)
+        crowdLabels, tIdxMap, tIdxs, K, nObjs, maxOrigIdx = loadCrowdLabels(inputFile, scores)
     
     #load gold labels if present
-    gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, classLabels, goldTypeCol)
+    gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, maxOrigIdx, classLabels, goldTypeCol)
         
     gold = translateGold(gold)
     
@@ -489,9 +489,9 @@ def loadData(configFile):
     return K,tableFormat,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes             
 
 def loadCombiner(configFile):
-    K,tableFormat,crowdLabels,gold,origCandIds,trIdxs,outputFile,confMatFile,goldTypes = loadData(configFile)
+    K,tableFormat,crowdLabs,gold,origCandIds,trIdxs,outFile,confMatFile,goldTypes = loadData(configFile)
     combiner = initFromConfig(configFile, K, tableFormat)
-    return combiner, crowdLabels, gold, origCandIds, trIdxs,outputFile,confMatFile,goldTypes
+    return combiner, crowdLabs, gold, origCandIds, trIdxs,outFile,confMatFile,goldTypes
 
 def saveTargets(pT, tIdxs, outputFile):
     #write predicted class labels to file

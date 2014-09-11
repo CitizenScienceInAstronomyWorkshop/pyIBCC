@@ -1,0 +1,80 @@
+>>> import sys; print('%s %s' % (sys.executable or sys.platform, sys.version))
+Python 2.7.6 (default, Mar 22 2014, 22:59:56) 
+Type "copyright", "credits" or "license" for more information.
+
+IPython 1.2.1 -- An enhanced Interactive Python.
+?         -> Introduction and overview of IPython's features.
+%quickref -> Quick reference.
+help      -> Python's own help system.
+object?   -> Details about 'object', use 'object??' for extra details.
+
+PyDev -- Python IDE for Eclipse
+For help on using PyDev's Console see http://pydev.org/manual_adv_interactive_console.html
+/usr/bin/python2.7 2.7.6 (default, Mar 22 2014, 22:59:56) 
+[GCC 4.8.2]
+>>> import os
+>>> cwd_path = [path for path in sys.path if 'org.python.pydev' not in path and 'Python3' not in path and 'python33.zip' not in path]
+>>> os.chdir(cwd_path[0])
+>>> %pylab
+Using matplotlib backend: TkAgg
+Populating the interactive namespace from numpy and matplotlib
+>>> runfile('/home/edwin/git/pyIBCC/python/ibccperformance.py')
+Combining...
+Ibcc iteration 1 absolute change was inf
+Ibcc iteration 2 absolute change was 22151.9981616
+Ibcc iteration 3 absolute change was 69.5337809742
+Ibcc iteration 4 absolute change was 1.51047840299
+Possible error -> lower bound went down. Maybe rounding error?
+Ibcc iteration 5 absolute change was -0.0752468233222
+IBCC finished in 5 iterations (max iterations allowed = 500).
+Nu: [  856.13793892  5657.86206108]
+Evaluating the results using the greedy classifications.
+acc: [ 0.78226626]
+specificity unknown
+Evaluating the results using curves with classification thresholds.
+Incomplete test labels, cannot evaluate AUC
+---For each class separately---
+Mean Recall: [ 0.78226626]
+Mean Specificity: 0
+Mean Precision: [ 1.]
+Mean AUC: [ 0.]
+Mean AP: [ 0.]
+--- Means across all classes ---
+Mean Accuracy: 0.782266260163
+Mean Recall: 0.782266260163
+Mean Specificity: 0
+Mean Precision: 1.0
+Mean AUC: 0.0
+Mean AP: 0.0
+>>> plt.figure(1)
+Out[7]: <matplotlib.figure.Figure at 0x7f9707397d50>
+>>> plt.legend(loc='upper center')
+Out[8]: <matplotlib.legend.Legend at 0x7f9706946550>
+>>> plt.figure(2)
+Out[9]: <matplotlib.figure.Figure at 0x7f97073bf650>
+>>> plt.legend(loc='upper center')
+Out[10]: <matplotlib.legend.Legend at 0x7f9706a1d110>
+>>> plt.title('Cumulative Distribution of Kepler Planets' )
+Out[11]: <matplotlib.text.Text at 0x7f970288ad50>
+>>> plt.figure(2)
+Out[12]: <matplotlib.figure.Figure at 0x7f97073bf650>
+>>> plt.title('Cumulative Distribution of Kepler Planets' )
+Out[13]: <matplotlib.text.Text at 0x7f9701d22a90>
+>>> plt.figure(1)
+Out[14]: <matplotlib.figure.Figure at 0x7f9707397d50>
+>>> plt.title('Cumulative Distribution of All Q1 Candidates' )
+Out[15]: <matplotlib.text.Text at 0x7f970288ad50>
+>>> plt.figure(3)
+Out[16]: <matplotlib.figure.Figure at 0x7f970721fa10>
+>>> plt.title('Normalised Cumulative Distribution of Kepler Planets' )
+Out[17]: <matplotlib.text.Text at 0x7f97071f58d0>
+>>> plt.figure(4)
+Out[18]: <matplotlib.figure.Figure at 0x7f97071be0d0>
+>>> plt.title('Cumulative Distribution of All Q1 Simulations' )
+Out[19]: <matplotlib.text.Text at 0x7f9702860f50>
+>>> plt.figure(5)
+Out[20]: <matplotlib.figure.Figure at 0x7f97047fea50>
+>>> plt.figure(6)
+Out[21]: <matplotlib.figure.Figure at 0x7f970467c1d0>
+>>> plt.title('Normalised Cumulative Distribution of Q1 Simulations' )
+Out[22]: <matplotlib.text.Text at 0x7f97056eafd0>

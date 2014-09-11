@@ -9,6 +9,7 @@ Created on 12 May 2014
 import numpy as np
 import matplotlib.pyplot as plt
 import ibccperformance as ip
+import logging
 
 def weightedVoteSchwamb(crowdLabels,goldAll,goldTypes,label):
     kIdxs = np.unique(crowdLabels[:,0])
@@ -70,11 +71,18 @@ def plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label):
     cumRecall = np.zeros(len(tVals))
     
     for i,t in enumerate(tVals):
-        
+        #find the boolean array of test indexes indicating this type
         thisType = np.bitwise_and(goldTypes<t, goldTypes>=start)
+        thisType = thisType[testIdxs]
+        #Find the test indexes of the current type 
+        idxs = testIdxs[thisType]
+        if len(idxs)==0:
+            logging.warning("No test idxs found with radius between " + str(start) + ' and ' + str(t))
+            continue
+                
         if i+1<len(tVals) and tVals[i+1]>t:
             start = t
-        idxs = testIdxs[thisType[testIdxs]]
+        
         pT_t = pT[idxs,:]
         greedyLabels = np.round(pT_t[:,1])
         gold_t = goldAll[idxs]
@@ -97,6 +105,9 @@ def plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label):
     plt.ylabel('Recall')
     plt.title('Recall of Planet Transit Simulations by Radius')
     plt.hold(True)
+    plt.grid(which="minor")
+    
+    ip.write_img("recallbyradius_" + label, 7)
     
     plt.figure(figure8)
     plt.xlabel('Radius/Earth Radii')
@@ -104,6 +115,9 @@ def plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label):
     plt.title('Recall of Planet Transit Simulations with Radius Greater than Indicated')
     plt.plot(tVals ,cumRecall, label=label)
     plt.legend()
+    plt.grid(which="minor")
+    
+    ip.write_img("recallbyradiusgreater_" + label, 8)
     
 def printMajorityVoteByType(pT, goldTypes, testIdxs, goldAll):
     tVals = [3, 4, 5, 6, 7, 10, 16]
@@ -147,93 +161,110 @@ ip.figure1 = 1
 ip.figure2 = 2
 ip.figure3 = 3
 
+plt.figure(7)
+figure7 = 7
+plt.figure(8)
+figure8 = 8
+
 # #TEST SET 1: Q1 Real Data Performance -- put that in the title
 # #only the real q1 data
-ip.testUnsupervised('./python/config/ph_q1_uns.py', "unsup. learning on real data")
-# #real data plus sims. Evaluate on real
-ip.testUnsupervised('./python/config/ph_q1_uns_plussims.py', "unsup. learning with real+sim data")
-# #real data plus sims. Eval on real. Sims as training.
-label = "simulations as training data"
-pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised('./python/config/ph_q1_supe_plussims.py', label)
-#plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+#label = "unsup. learning on real"
+#ip.testUnsupervised('./python/config/ph_q1_uns.py', label, "Confirmed Planets")
 
-# # plt.figure()
-# # plt.figure()
-# # plt.figure()
-# # ip.figure1 = 4
-# # ip.figure2 = 5
-# # ip.figure3 = 6
-# 
-# plt.figure(7)
-# figure7 = 7
-# plt.figure(8)
-# figure8 = 8
-# 
-# #TEST SET 2: Q1 Simulated Data Performance, all models learned using simulated and real crowd data.
-# #real data plus sims, evaluate only on sims 
-# #label = "unsup. learning with real+sim data"
-# #pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
-# #                                    './python/config/ph_q1_uns_sims.py', label)
-# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-# #sims only
-# #label = "unsup. learning with sim data only"
-# #pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
-# #                                    './python/config/ph_q1_uns_simsonly.py', label)#sims only, evaluate on sims
-# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-# #real data plus sims. Eval on half of sims, other half as training.
-# #label = "real+sim data, 50% sims. as training data"
-# #pT,goldTypes,testIdxs,goldAll,_,_ = ip.testSupervised(\
-# #                                  './python/config/ph_q1_supe_sims.py', label)
-# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-# #simulated data only, using 50% as training
-# #label = "sim data only, 50% sims. as training data"
-# #pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
-# #                                './python/config/ph_q1_supe_simsonly.py', label)
-# #plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
-# 
-# #Test what happens when you divide peoples' reliability by radius group
-# # #real data plus sims. Evaluate on real
-# # label = "unsup. learning with real+sim data"
-# # ip.testUnsupervised('./python/config/ph_q1_uns_plussims_rad.py', label)
-# # #real data plus sims, evaluate only on sims 
-# # label = "unsup. learning with real+sim data"
-# # pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
-# #                                     './python/config/ph_q1_uns_sims_rad.py', label)
+# #real data plus sims. Evaluate on real
+#label = "unsup. learning with real+sim"
+#ip.testUnsupervised('./python/config/ph_q1_uns_plussims.py', label, "Confirmed Planets")
+
 # #real data plus sims. Eval on real. Sims as training.
-# 
-# NEED TO MERGE THE FIXED ERRORS FILE WITH THE REAL DATA FILE TO REPLACE THE REAL_AND_SIMS GOLD FILE.
+label = "sims as training"
+pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+                      './python/config/ph_q1_supe_plussims.py', label, "Confirmed Planets")
+plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+
+#TEST SET 1+: Q1 Real Data Performance, IBCC divides peoples' reliability by radius group
+  
 # ADD IN ANOTHER METHOD FOR COMPARISON.
 # REPEAT THE 50% SIMS METHOD MULTIPLE TIMES IF NOT DONE ALREADY?
-# 
-# label = "simulations as training data"
-# pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
-#                                    './python/config/ph_q1_supe_plussims_rad.py', label, eval=False)
-# pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
-#                           np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
-# plotRecalByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
-# 
-# plt.figure(9)
-# figure7 = 9
-# plt.figure(10)
-# figure8 = 10
-# 
-# # ip.plotCumDist(pTsum,2,testIdxsReal,goldAll, label)        
-# # acc,recall,spec,prec,auc,ap = \
-# #     ip.getAccMeasures(pTsum,goldAll,2,testIdxsReal)
-# # #real data plus sims. Eval on half of sims, other half as training.
-# label = "real+sim data, 50% sims. as training data"
-# pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
-#                                    './python/config/ph_q1_supe_sims_rad.py', label, eval=False)
-# pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
-#                           np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
-# plotRecalByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
-# # #remove the real ones from the testIdxs
-# # goldAll[testIdxsReal]  = -1
-# # 
-# # testIdxs = np.setdiff1d(testIdxs, testIdxsReal, True)
-# # 
-# # goldAll[goldAll>1] = 1
-# # ip.plotCumDist(pTsum,2,testIdxs,goldAll, label)        
-# # acc,recall,spec,prec,auc,ap = \
-# #     ip.getAccMeasures(pTsum,goldAll,2,testIdxs)
-# # plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+  
+label = "simulations as training, radius split"
+pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+                           './python/config/ph_q1_supe_plussims_rad.py', label, eval=False)
+pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
+                          np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
+plotRecallByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
+
+#########################################################################
+
+plt.figure()
+plt.figure()
+plt.figure()
+ip.figure1 = 4
+ip.figure2 = 5
+ip.figure3 = 6
+ 
+#TEST SET 2: Q1 Simulated Data Performance, all models learned using simulated and real crowd data.
+#real data plus sims, evaluate only on sims 
+label = "unsup. learning with real+sim"
+pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
+                                    './python/config/ph_q1_uns_sims.py', label)
+plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+
+#sims only
+label = "unsup. learning with sims only"
+pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
+                                    './python/config/ph_q1_uns_simsonly.py', label)#sims only, evaluate on sims
+plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+
+#real data plus sims. Eval on half of sims, other half as training.
+label = "real+sim, 50% sims as training"
+pT,goldTypes,testIdxs,goldAll,_,_ = ip.testSupervised(\
+                                './python/config/ph_q1_supe_sims.py', label)
+plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+
+#simulated data only, using 50% as training
+label = "sims only, 50% sims as training"
+pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+                                './python/config/ph_q1_supe_simsonly.py', label)
+plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
+  
+#TEST SET 2+: Simulated Data Performance, IBCC divides reliability by radius
+# #real data plus sims. Eval on half of sims, other half as training.
+label = "real+sim, 50% sims as training, radius split"
+pT,goldTypes,testIdxs,goldAll,crowdLabels,origCandIds = ip.testSupervised(\
+                               './python/config/ph_q1_supe_sims_rad.py', label, eval=False)
+pTsum = np.concatenate( (pT[:,0].reshape(pT.shape[0],1),\
+                          np.sum(pT[:,1:],1).reshape(pT.shape[0],1)), axis=1)
+plotRecallByRadius(pTsum, goldTypes, testIdxs, goldAll, label)
+
+###########################################################################
+
+#From test set 1+, removed because we don't test radius split in unsupervised mode 
+#real data plus sims. Evaluate on real -- unsupervised doesn't make sense with radius split
+# label = "unsup. learning with real+sim, radius split"
+# ip.testUnsupervised('./python/config/ph_q1_uns_plussims_rad.py', label)
+
+#real data plus sims. Eval on real. Sims as training.
+  
+#From test set 2+, see above 
+#real data plus sims, evaluate only on sims 
+# label = "unsup. learning with real+sim, radius split"
+# pT,goldTypes,testIdxs,goldAll = ip.testUnsupervised(\
+#                                     './python/config/ph_q1_uns_sims_rad.py', label)
+# plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)  
+  
+#########################################################################    
+  
+# ip.plotCumDist(pTsum,2,testIdxsReal,goldAll, label)        
+# acc,recall,spec,prec,auc,ap = \
+#     ip.getAccMeasures(pTsum,goldAll,2,testIdxsReal)
+
+#remove the real ones from the testIdxs
+# goldAll[testIdxsReal]  = -1
+#  
+# testIdxs = np.setdiff1d(testIdxs, testIdxsReal, True)
+#  
+# goldAll[goldAll>1] = 1
+# ip.plotCumDist(pTsum,2,testIdxs,goldAll, label)        
+# acc,recall,spec,prec,auc,ap = \
+#     ip.getAccMeasures(pTsum,goldAll,2,testIdxs)
+# plotRecallByRadius(pT, goldTypes, testIdxs, goldAll, label)
