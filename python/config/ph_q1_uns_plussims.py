@@ -4,10 +4,10 @@ from python.config.ph_q1_supe_plussims import goldTypeCol
 print 'Configuring IBCC'
 
 def translateGold(gold):
-    #turn the EBs and simulations into instances of "planet"
-    gold[gold==2] = 1
+    #EBs are just unlabelled data - not labelled training, not used for evaluation
+    gold[gold==2] = -1
+    #simulations are treated as planets 
     gold[gold==3] = 1
-    gold[gold==-1] = 0
     return gold
 
 scores = np.array([9, 10])

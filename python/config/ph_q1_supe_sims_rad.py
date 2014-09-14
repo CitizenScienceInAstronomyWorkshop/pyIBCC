@@ -5,17 +5,17 @@ print 'Configuring IBCC'
 #Include the simulations as training data.
 
 def translateGold(gold):
-    #turn the EBs and simulations into instances of "planet"
-    gold[gold==2] = 1
+    #EBs are just unlabelled data - not labelled training, not used for evaluation
+    gold[gold==2] = -1
+    #simulations are treated as planets 
     gold[gold==3] = 1
-#     gold[gold==-1] = 0
     return gold
 
 scores = np.array([9, 10])
 nScores = len(scores)
 nClasses = 8
 inputFile =   './data/PH data/paper_crowd/PlanetHunters_3-26-14_Q1_ann_realAndSim.csv'
-goldFile =    './data/PH data/paper_gold/PH6-3-14_Q1_sims_with_real.csv'#_rad?
+goldFile =    './data/PH data/paper_gold/PH6-3-14_Q1_sims.csv'#_rad?
 outputFile =  './output/ph/output.csv'
 confMatFile = './output/ph/confMat.csv'
 classLabels=None#do this conversion in a spreadsheet due to bugs['candidate','planet','eb','simulation']

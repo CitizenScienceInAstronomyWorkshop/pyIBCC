@@ -5,10 +5,8 @@ print 'Configuring IBCC'
 #Include the simulations as training data.
 
 def translateGold(gold):
-    #turn the EBs and simulations into instances of "planet"
-    gold[gold==2] = 1
+    #simulations are treated as planets 
     gold[gold==3] = 1
-#     gold[gold==-1] = 0
     return gold
 
 scores = np.array([9, 10])
