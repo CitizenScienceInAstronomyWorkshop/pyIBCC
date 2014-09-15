@@ -1,5 +1,4 @@
 import numpy as np
-from python.config.ph_q1_supe_plussims import goldTypeCol
 
 print 'Configuring IBCC'
 
