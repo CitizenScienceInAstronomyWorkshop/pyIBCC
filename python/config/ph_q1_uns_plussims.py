@@ -1,4 +1,5 @@
 import numpy as np
+import ph_common
 
 print 'Configuring IBCC'
 
@@ -18,8 +19,8 @@ goldFile =    './data/PH data/paper_gold/PH3-26-14_Q1_real.csv'
 outputFile =  './output/ph/output.csv'
 confMatFile = './output/ph/confMat.csv'
 classLabels=None#do this conversion in a spreadsheet due to bugs['candidate','planet','eb','simulation']
-alpha0 = np.array([[199, 200], [200, 199]]) #for PH data
-nu0 = np.array([10.0, 10.0])
+alpha0 = ph_common.alpha0
+nu0 = ph_common.nu0
 
 goldTypeCol = 3
 

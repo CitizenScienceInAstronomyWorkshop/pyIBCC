@@ -184,7 +184,7 @@ class Ibcc(object):
                 Cl = coo_matrix((data,(rows,cols)), shape=(self.nObjs, self.K))
                 C[l] = Cl
             self.crowdLabels = crowdLabels
-            self.obsIdxs = np.unique(crowdLabels[:1])
+            self.obsIdxs = np.unique(crowdLabels[:,1])
         self.C = C
         
     def initK(self, crowdLabels):
