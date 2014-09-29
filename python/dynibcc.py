@@ -1,4 +1,4 @@
- '''
+'''
 @author: Edwin Simpson
 '''
 import sys
@@ -10,12 +10,12 @@ import ibcc
 def state_to_alpha(logodds, var):
     alpha1 = 1/var * (1+np.exp(logodds))
     alpha2 = alpha1 * (1+np.exp(-logodds))
-    return alpha1, alpha2
+    return alpha1.reshape(logodds.shape), alpha2.reshape(logodds.shape)
 
-def alpha_to_state(alpha):
-    Wmean = np.log(alpha)-np.log(np.sum(alpha,axis=2)-alpha)
-    P = np.diag( (1/alpha) + \
-        (1/(np.sum(alpha,axis=2)-alpha)) )
+def alpha_to_state(alpha, l):
+    Wmean = np.log(alpha[:,l])-np.log(np.sum(alpha,axis=1)-alpha[:,l])
+    P = np.diagflat( (1/alpha[:,l]) + \
+        (1/(np.sum(alpha,axis=1)-alpha[:,l])) )
     return Wmean, P
 
 class Dynibcc(ibcc.Ibcc):
@@ -37,7 +37,7 @@ class Dynibcc(ibcc.Ibcc):
         P_po = np.zeros((self.nClasses,self.nClasses,self.Tau))
         q = np.zeros(self.K)
         tau_prev = np.zeros(self.K) -1
-        I = np.eye((self.nClasses,self.nClasses))
+        I = np.eye(self.nClasses)
         
         eta_pr = np.zeros(self.Tau)
         r_pr = np.zeros(self.Tau)
@@ -45,29 +45,30 @@ class Dynibcc(ibcc.Ibcc):
         Kalman = np.zeros((self.nClasses, self.Tau))
         
         for tau in range(self.Tau): 
-            k = self.crowdLabels[tau,0]
-            i = self.crowdLabels[tau,1]
-            c = int(self.crowdLabels[tau,2]==l)
+            k = self.crowdlabels[tau,0]
+            i = self.crowdlabels[tau,1]
+            c = int(self.crowdlabels[tau,2]==l)
             tau_pr = tau_prev[k]
             tau_prev[k] = k
             h = self.ET[i,:]
             
             if tau_pr == -1:
-                Wmean_pr, P_pr = alpha_to_state(self.alpha0[:,l,tau])
+                Wmean_pr, P_pr = alpha_to_state(self.alpha0[:,:,tau], l)
             else:
                 Wmean_pr = Wmean_po[:,tau_pr]
                 P_pr = P_po[:,:,tau_pr] + q[k]*I
             
                 pi_var = np.diag(P_pr)
             
-                self.alpha0[:,l,tau], alpha0sum = state_to_alpha(Wmean_pr,pi_var)
+                alpha0_l, alpha0sum = state_to_alpha(Wmean_pr,pi_var)
+                self.alpha0[:,l,tau] = alpha0_l.reshape((self.nClasses,1))
                 if self.nClasses==2:
-                    self.alpha0[:,1-l,tau] = alpha0sum-self.alpha0[:,l,tau]
+                    self.alpha0[:,1-l,tau] = alpha0sum.reshape((self.nClasses,1))-self.alpha0[:,l,tau]
             
             eta_pr[tau] = h.T.dot(Wmean_pr)
             r_pr[tau] = h.T.dot(P_pr).dot(h)
             
-            alpha_tilde_pr,alpha_tilde_pr_sum = state_to_alpha(eta_pr, r_pr)
+            alpha_tilde_pr,alpha_tilde_pr_sum = state_to_alpha(eta_pr[tau], r_pr[tau])
 
             #update to get posterior given current time-step
             alpha_tilde_po = alpha_tilde_pr + c
@@ -88,7 +89,7 @@ class Dynibcc(ibcc.Ibcc):
             Kalman[:,tau] = P_pr.T.dot(h) / r_pr[tau]
             R = 1 - (r_po/r_pr[tau])
             
-            Wmean_po[:,tau] = Wmean_pr + Kalman[:,tau]*z
+            Wmean_po[:,tau] = Wmean_pr.reshape(self.nClasses) + Kalman[:,tau]*z
             P_po[:,:,tau] = P_pr - (Kalman[:,tau].dot(P_pr)*R)
             
         #SMOOTHING -- UPDATES GIVEN ALL TIMESTEPS
@@ -97,8 +98,8 @@ class Dynibcc(ibcc.Ibcc):
         Lambda_cov = np.zeros((self.nClasses, self.nClasses, self.K))
         
         for tau in list(reversed(range(self.Tau))):
-            k = self.crowdLabels[tau,0]
-            i = self.crowdLabels[tau,1]
+            k = self.crowdlabels[tau,0]
+            i = self.crowdlabels[tau,1]
             h = self.ET[i,:]
                         
             delta_Wmean = P_po[:,:,tau].dot(lambda_mean[:,k])
@@ -107,8 +108,8 @@ class Dynibcc(ibcc.Ibcc):
             Wmean_po[:,tau] = Wmean_po[:,tau] - delta_Wmean
             P_po[:,:,tau] = P_po[:,:,tau]-delta_P
             
-            eta_po[tau] = h.T.dot(Wmean_po[:,tau])
-            r_po[tau] = h.T.dot(P_po[:,:,tau]).dot(h)
+            eta_po = h.T.dot(Wmean_po[:,tau])
+            r_po = h.T.dot(P_po[:,:,tau]).dot(h)
             
             z = eta_po - eta_pr[tau]
             R = 1 - (r_po/r_pr[tau])
@@ -119,8 +120,10 @@ class Dynibcc(ibcc.Ibcc):
             
             pi_var = np.diag(P_po[:,:,tau])
             
-            self.alpha[:,l,tau], alphasum = state_to_alpha(Wmean_po[:,tau],pi_var)
-            if self.nClassess==2:
+            alpha_l, alphasum = state_to_alpha(Wmean_po[:,tau],pi_var)
+            self.alpha[:,l,tau] = alpha_l.reshape((self.nClasses,1))
+            alphasum = alphasum.reshape((self.nClasses,1))
+            if self.nClasses==2:
                 self.alpha[:,1-l,tau] = alphasum - self.alpha[:,l,tau]
                 
     def expecLnPi(self):
@@ -164,13 +167,13 @@ class Dynibcc(ibcc.Ibcc):
         return L
          
     def preprocessCrowdLabels(self, crowdLabels):
-        super(Dynibcc,self).preprocessCrowdLabels(self,crowdLabels)
+        super(Dynibcc,self).preprocessCrowdLabels(crowdLabels)
         
         if self.crowdTable != None:
             self.Tau = self.crowdTable.shape[0] * self.crowdTable.shape[1]
             print "implementation for table format not complete -- no way of knowing which order data points occurred in"
         else:
-            self.Tau = self.crowdLabels.shape[0]
+            self.Tau = self.crowdlabels.shape[0]
             
         #need to re-init pi now we know how many time steps there are 
         self.initLnPi()
@@ -197,20 +200,23 @@ class Dynibcc(ibcc.Ibcc):
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         self.lnPi = np.zeros((self.nClasses,self.nScores,self.Tau))
-        for s in range(self.nScores):        
-            self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha 
+        self.lnPi = psi(self.alpha) - psiSumAlpha 
        
-    def __init__(self, nClasses, nScores, alpha0, nu0, K, tableFormat=False):
-        self.nClasses = nClasses
-        self.nScores = nScores
-        self.alpha0 = alpha0
-        self.nu0 = nu0
-        self.K = K
-        self.initParams()
-        if tableFormat:
-            self.crowdTable = True
-        else:
-            self.crowdTable = None             
+
+    def __init__(self, nClasses=2, nScores=2, alpha0=None, nu0=None, K=1, tableFormat=False, dh=None):
+        super(Dynibcc,self).__init__(nClasses, nScores, alpha0, nu0, K, tableFormat, dh)
+#        
+#     def __init__(self, nClasses, nScores, alpha0, nu0, K, tableFormat=False):
+#         self.nClasses = nClasses
+#         self.nScores = nScores
+#         self.alpha0 = alpha0
+#         self.nu0 = nu0
+#         self.K = K
+#         self.initParams()
+#         if tableFormat:
+#             self.crowdTable = True
+#         else:
+#             self.crowdTable = None             
 
 #TODO convert these to static class methods so we can inherit from Ibcc
 def initFromConfig(configFile, K, tableFormat=False):
@@ -243,12 +249,11 @@ def save_pi(alpha, nClasses, nScores, K, confMatFile):
         flatPi = np.swapaxes(flatPi, 0, 2)
         np.savetxt(confMatFile, flatPi.reshape(K, nClasses*nScores), fmt='%1.3f')    
     
+    
 if __name__ == '__main__':
-
     if len(sys.argv)>1:
         configFile = sys.argv[1]
     else:
         configFile = './config/my_project.py'
-    #TODO convert runibcc to a static class method so we can call it like this
-    Dynibcc.runIbcc(configFile)
+    ibcc.runIbcc(configFile, Dynibcc)
     

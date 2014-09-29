@@ -23,24 +23,22 @@ class Evaluator(object):
     
     skill_fig = 11
     
-    outputdir = "/home/edwin/git/pyIBCC/output/ph/plots/"
+    outputdir = "./output/plots/"
     
     combiner = None
-    crowdLabels = []
     pT = []
+    
+    dh = None #data handler for IBCC
     
     testIdxs = []
     trIdxs = []
     
-    gold = [] #all gold labels, including test data
     goldTr = [] #gold labels for training
-    goldTypes = [] # sub-types of the classes
+    goldsubtypes = [] # sub-types of the classes
     disc_gold_types = []
     
     secondary_type_cats = [2, 3, 4, 5, 6, 7, 10, 16]
-    
-    orig_cand_ids = []
-    
+        
     configfile = ""
     algolabel = ""
     datalabel = ""
@@ -102,7 +100,7 @@ class Evaluator(object):
         '''
         
         pT_test_pos = self.pT[self.testIdxs,1:]
-        labels = self.gold[self.testIdxs].reshape(-1)
+        labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
         
         labelMatrix = np.zeros((len(labels),nClasses-1)) 
         for j in range(1,nClasses):
@@ -161,7 +159,7 @@ class Evaluator(object):
         # have to select the highest y value for any duplicate x values
         #skip first class as this is used for uninteresting examples
         
-        gold_test = self.gold[self.testIdxs]
+        gold_test = self.dh.goldlabels[self.testIdxs]
         
         for j in range(1,nClasses):
             X = np.sort(self.pT[self.testIdxs,j]).reshape(-1)
@@ -253,7 +251,7 @@ class Evaluator(object):
         
         for i,t in enumerate(tvals):
             #find the boolean array of test indexes indicating this type
-            thisType = np.bitwise_and(self.goldTypes<t, self.goldTypes>=start)
+            thisType = np.bitwise_and(self.dh.goldsubtypes<t, self.dh.goldsubtypes>=start)
             thisType = thisType[self.testIdxs]
             #Find the test indexes of the current type 
             idxs = self.testIdxs[thisType]
@@ -267,7 +265,7 @@ class Evaluator(object):
             
             pT_t = self.pT[idxs,:]
             greedyLabels = np.round(pT_t[:,1])
-            gold_t = self.gold[idxs]
+            gold_t = self.dh.goldlabels[idxs]
             pos_t = gold_t==1
             
             tp = float(np.sum(greedyLabels[pos_t]==1))
@@ -347,16 +345,16 @@ class Evaluator(object):
            
         for i,t in enumerate(tVals):
             
-            thisType = np.bitwise_and(self.goldTypes<t, self.goldTypes>=start)
+            thisType = np.bitwise_and(self.dh.goldsubtypes<t, self.dh.goldsubtypes>=start)
             idxs = self.testIdxs[thisType[self.testIdxs]]
             pT_t = self.pT[idxs,:]
             greedyLabels = np.round(pT_t[:,1])
             start = t
             hits = np.zeros(len(thisType))
             seenBy = np.zeros(len(thisType))
-            for l in range(self.crowdLabels.shape[0]):
-                idx = int(self.crowdLabels[l,1])
-                if self.crowdLabels[l,2]==0:
+            for l in range(self.dh.crowdlabels.shape[0]):
+                idx = int(self.dh.crowdlabels[l,1])
+                if self.dh.crowdlabels[l,2]==0:
                     hits[idx] += float(1)
                 seenBy[idx] += float(1)
                 
@@ -379,56 +377,56 @@ class Evaluator(object):
         #simulations. When running this to filter simluations only, it is unfair to compare 
         #the paper's results with IBCC, since this method uses the test data to do training....
         #The iterative, semi-supervised nature of this method mean it is more like IBCC than it first seems.
-        kIdxs = np.unique(self.crowdLabels[:,0])
+        kIdxs = np.unique(self.dh.crowdlabels[:,0])
         
         #counts per agent
         nCorrect = np.zeros(len(kIdxs))
         
         #values per data point
-        detectionrate = np.zeros(len(self.gold))
-        nClassifiers = np.zeros(len(self.gold))
+        detectionrate = np.zeros(len(self.dh.goldlabels))
+        nClassifiers = np.zeros(len(self.dh.goldlabels))
         
-        for l in range(self.crowdLabels.shape[0]):
+        for l in range(self.dh.crowdlabels.shape[0]):
             #for each label provided by crowd
-            if self.crowdLabels[l,1] not in self.testIdxs:
+            if self.dh.crowdlabels[l,1] not in self.testIdxs:
                 #training labels
-                k = int(self.crowdLabels[l,0])
-                i = int(self.crowdLabels[l,1])
+                k = int(self.dh.crowdlabels[l,0])
+                i = int(self.dh.crowdlabels[l,1])
                         
                 #positive examples in training set
-                if self.gold[i]==1:
+                if self.dh.goldlabels[i]==1:
                     #assumes 0 is positive!!!
-                    nCorrect[k] += self.crowdLabels[l,2]==0 
-                    detectionrate[i] += self.crowdLabels[l,2]==0 
+                    nCorrect[k] += self.dh.crowdlabels[l,2]==0 
+                    detectionrate[i] += self.dh.crowdlabels[l,2]==0 
                     nClassifiers[i] += 1
                 else:
                     nClassifiers[i] += 1
             else:
-                i = int(self.crowdLabels[l,1])
+                i = int(self.dh.crowdlabels[l,1])
                 nClassifiers[i] +=1
                     
         print 'Fraction of candidates with >=5 classifications: ' + \
-                str(float(np.sum(nClassifiers>=5))/float(len(self.gold)))
+                str(float(np.sum(nClassifiers>=5))/float(len(self.dh.goldlabels)))
                     
         detectionrate = np.divide(detectionrate, nClassifiers)
         errors = np.zeros(len(kIdxs)) 
-        for l in range(self.crowdLabels.shape[0]):
+        for l in range(self.dh.crowdlabels.shape[0]):
             #for all labels with corresponding training
-            if self.crowdLabels[l,1] not in self.testIdxs:
-                k = int(self.crowdLabels[l,0])
-                i = int(self.crowdLabels[l,1])
-                if self.gold[i]==1:  #positive training examples
-                    errors[k] += 0.2*detectionrate[i]* (self.crowdLabels[l,2]==1)
+            if self.dh.crowdlabels[l,1] not in self.testIdxs:
+                k = int(self.dh.crowdlabels[l,0])
+                i = int(self.dh.crowdlabels[l,1])
+                if self.dh.goldlabels[i]==1:  #positive training examples
+                    errors[k] += 0.2*detectionrate[i]* (self.dh.crowdlabels[l,2]==1)
         
         weights = np.ones(len(kIdxs)) + nCorrect - errors 
         weights = weights - np.min(weights)
         weights = np.divide(weights, np.max(weights))
         
-        pTVote = np.ones((len(self.gold),2))
-        for l in range(self.crowdLabels.shape[0]):
-            i = int(self.crowdLabels[l,1])
-            k = int(self.crowdLabels[l,0])
-            v = self.crowdLabels[l,2]==0
+        pTVote = np.ones((len(self.dh.goldlabels),2))
+        for l in range(self.dh.crowdlabels.shape[0]):
+            i = int(self.dh.crowdlabels[l,1])
+            k = int(self.dh.crowdlabels[l,0])
+            v = self.dh.crowdlabels[l,2]==0
             if v:
                 pTVote[i,1]+=weights[k]
             else:
@@ -440,12 +438,12 @@ class Evaluator(object):
         #An alternative to the runIbcc function in the Ibcc module, which does not save the resulting 
         #classifications, but prints a performance analysis
         if self.testIdxs==None or self.testIdxs==[]:
-            self.testIdxs = np.argwhere(np.bitwise_and(self.gold>-1,self.goldTr==-1))
+            self.testIdxs = np.argwhere(np.bitwise_and(self.dh.goldlabels>-1,self.goldTr==-1))
             self.testIdxs = self.testIdxs.reshape(-1)
      
-        print ' No. test indexes = ' + str(len(self.testIdxs)) + ", with +ve examples " + str(len(np.argwhere(self.gold[self.testIdxs]>0)))
+        print ' No. test indexes = ' + str(len(self.testIdxs)) + ", with +ve examples " + str(len(np.argwhere(self.dh.goldlabels[self.testIdxs]>0)))
      
-        self.pT = self.combiner.combineClassifications(self.crowdLabels, self.goldTr)
+        self.pT = self.combiner.combineClassifications(self.dh.crowdlabels, self.goldTr)
         print 'Nu: ' + str(self.combiner.nu)  
         
         if self.merge_all_pos:
@@ -463,8 +461,7 @@ class Evaluator(object):
         return acc,recall,spec,prec,auc,ap,nfiltered,filter_rate 
     
     def testSchwamb(self):
-        self.combiner, self.crowdLabels, self.gold, self.orig_cand_ids,_,_,_,self.goldTypes = \
-                                                                ibcc.loadCombiner(self.configfile)
+        self.combiner, self.dh = ibcc.loadCombiner(self.configfile)
         self.weightedVoteSchwamb()   
         nclasses = self.pT.shape[1]                                                        
         self.plotCumDist(nclasses)
@@ -475,9 +472,8 @@ class Evaluator(object):
         
     def testUnsupervised(self, runEvaluation=True):
         # no training data, test all points we have true labels for
-        self.combiner, self.crowdLabels, self.gold, self.orig_cand_ids,_,_,_,self.goldTypes = \
-                                                                ibcc.loadCombiner(self.configfile)        
-        self.goldTr = np.zeros(len(self.gold)) -1 
+        self.combiner, self.dh = ibcc.loadCombiner(self.configfile)        
+        self.goldTr = np.zeros(len(self.dh.goldlabels)) -1 
         
         if runEvaluation:
             acc,recall,spec,prec,auc,ap,nfiltered,filter_rate \
@@ -492,28 +488,27 @@ class Evaluator(object):
         '''
         Turn continuous feature values into discrete types that can be used as classes for training
         '''
-        self.disc_gold_types = deepcopy(self.gold)
+        self.disc_gold_types = deepcopy(self.dh.goldlabels)
         for i in range(1, len(self.secondary_type_cats)):
             start = self.secondary_type_cats[i-1]
             end = self.secondary_type_cats[i]
             
-            this_type = np.bitwise_and(self.goldTypes<end, self.goldTypes>=start)
+            this_type = np.bitwise_and(self.dh.goldsubtypes<end, self.dh.goldsubtypes>=start)
             self.disc_gold_types[this_type] = i
         
     def testSupervised(self, runEvaluation=True):
         #supply all training data. The metrics will be unfair
-        self.combiner, self.crowdLabels, self.gold, self.orig_cand_ids, self.trIdxs,_,_, self.goldTypes \
-                                                                = ibcc.loadCombiner(self.configfile)
+        self.combiner, self.dh = ibcc.loadCombiner(self.configfile)
         
-        if self.goldTypes != None and len(self.goldTypes)>0 and self.combiner.nClasses>2:
+        if self.dh.goldsubtypes != None and len(self.dh.goldsubtypes)>0 and self.combiner.nClasses>2:
             self.discretize_secondary_gold()
-            self.goldTr = np.zeros(len(self.gold)) -1
-            self.goldTr[self.trIdxs] = self.disc_gold_types[self.trIdxs]
-        elif self.trIdxs != None:
-            self.goldTr = np.zeros(len(self.gold)) -1
-            self.goldTr[self.trIdxs] = self.gold[self.trIdxs]
+            self.goldTr = np.zeros(len(self.dh.goldlabels)) -1
+            self.goldTr[self.dh.trainids] = self.disc_gold_types[self.dh.trainids]
+        elif self.dh.trainids != None:
+            self.goldTr = np.zeros(len(self.dh.goldlabels)) -1
+            self.goldTr[self.dh.trainids] = self.dh.goldlabels[self.dh.trainids]
         else:
-            self.goldTr = self.gold
+            self.goldTr = self.dh.goldlabels
         
         if runEvaluation:
             acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.testIbccPerformance(runEvaluation=runEvaluation)
@@ -535,7 +530,7 @@ class Evaluator(object):
             return
         
         #load the data
-        self.combiner, self.crowdLabels, self.gold, _,_,_,_ = ibcc.loadCombiner(configFile)        
+        self.combiner, self.dh = ibcc.loadCombiner(configFile)        
         meanAcc = 0
         meanRecall = np.zeros((1,self.combiner.nClasses-1))
         meanSpecificity = np.zeros((1, self.combiner.nClasses-1))
@@ -544,15 +539,15 @@ class Evaluator(object):
         meanAp = np.zeros(self.combiner.nClasses-1)
         
         #split the data into nFolds different partitions
-        trIdxs = np.argwhere(self.gold>-1)
+        trIdxs = np.argwhere(self.dh.goldlabels>-1)
         
         kf = KFold(len(trIdxs), n_folds=nFolds, indices=False)      
         
         #for each partition, run IBCC
         #any unlabelled data is included and is not split
         for trMask, testMask in kf:
-            goldPartition = np.zeros(len(self.gold)) -1 
-            goldPartition[trIdxs[trMask]] = self.gold[trIdxs[trMask]]
+            goldPartition = np.zeros(len(self.dh.goldlabels)) -1 
+            goldPartition[trIdxs[trMask]] = self.dh.goldlabels[trIdxs[trMask]]
             self.goldTr = goldPartition
             self.testIdxs = trIdxs[testMask].reshape(-1)
             
@@ -581,14 +576,14 @@ class Evaluator(object):
         and translate back to original IDs for further review
         '''
         unlab_idxs = np.ones(self.combiner.nObjs)
-        unlab_idxs[np.argwhere(self.gold>-1)] = 0
+        unlab_idxs[np.argwhere(self.dh.goldlabels>-1)] = 0
         unlab_idxs = np.argwhere(unlab_idxs)
         
         pT_unlab = self.pT[unlab_idxs,1]
         discoveries = np.argwhere(pT_unlab>0.5)
         disco_idxs = unlab_idxs[discoveries]
         
-        disco_orig_idxs = self.orig_cand_ids[disco_idxs]
+        disco_orig_idxs = self.dh.targetidxs[disco_idxs]
         np.savetxt(self.outputdir+"/possible_discoveries.csv", disco_orig_idxs)
             
     #testXValidation('./config/my_project.py')
