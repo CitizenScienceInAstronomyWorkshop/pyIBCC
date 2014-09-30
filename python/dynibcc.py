@@ -50,7 +50,7 @@ class DynIBCC(ibcc.IBCC):
             c = int(self.crowdlabels[tau,2]==l)
             tau_pr = tau_prev[k]
             tau_prev[k] = k
-            h = self.ET[i,:]
+            h = self.E_t[i,:]
             
             if tau_pr == -1:
                 Wmean_pr, P_pr = alpha_to_state(self.alpha0[:,:,tau], l)
@@ -100,7 +100,7 @@ class DynIBCC(ibcc.IBCC):
         for tau in list(reversed(range(self.Tau))):
             k = self.crowdlabels[tau,0]
             i = self.crowdlabels[tau,1]
-            h = self.ET[i,:]
+            h = self.E_t[i,:]
                         
             delta_Wmean = P_po[:,:,tau].dot(lambda_mean[:,k])
             delta_P = P_po[:,:,tau].dot(Lambda_cov[:,:,k]).dot(P_po[:,:,tau].T)
@@ -150,7 +150,7 @@ class DynIBCC(ibcc.IBCC):
             
         EEnergy = lnpCT + lnpPi + lnpKappa
         
-        ET = self.ET[self.ET!=0]
+        ET = self.E_t[self.E_t!=0]
         lnqT = np.sum( ET*np.log(ET) )
 
         lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \

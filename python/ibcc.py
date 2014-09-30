@@ -34,14 +34,14 @@ class IBCC(object):
     nu = []
     lnPi = []
     alpha = []
-    ET = []
+    E_t = []
     
     observed_idxs = []
     
     keeprunning = True # set to false causes the combine_classifications method to exit without completing
 
     def expec_lnkappa(self):#Posterior Hyperparams
-        sumET = np.sum(self.ET[self.observed_idxs,:], 0)
+        sumET = np.sum(self.E_t[self.observed_idxs,:], 0)
         for j in range(self.nclasses):
             self.nu[j] = self.nu0[j] + sumET[j]
         self.lnkappa = psi(self.nu) - psi(np.sum(self.nu))
@@ -49,7 +49,7 @@ class IBCC(object):
     def post_Alpha(self):#Posterior Hyperparams -- move back to static IBCC
         for j in range(self.nclasses):
             for l in range(self.nscores):
-                Tj = self.ET[:,j].reshape((self.N,1))
+                Tj = self.E_t[:,j].reshape((self.N,1))
                 counts = self.C[l].T.dot(Tj).reshape(-1)
                 self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
        
@@ -87,7 +87,7 @@ class IBCC(object):
 
     def expec_t(self):
         
-        self.ET = np.zeros((self.N, self.nclasses))
+        self.E_t = np.zeros((self.N, self.nclasses))
         pT = joint = np.zeros((self.N, self.nclasses))
         lnjoint = self.lnjoint()
             
@@ -100,18 +100,18 @@ class IBCC(object):
         norma = np.sum(joint, axis=1)
         for j in range(self.nclasses):
             pT[:,j] = joint[:,j]/norma
-            self.ET[:,j] = pT[:,j]
+            self.E_t[:,j] = pT[:,j]
             
         for j in range(self.nclasses):            
             #training labels
             row = np.zeros((1,self.nclasses))
             row[0,j] = 1
-            self.ET[self.trainT==j,:] = row    
+            self.E_t[self.train_t==j,:] = row    
             
         return lnjoint
       
     def post_lnjoint_ct(self, lnjoint):
-        lnpCT = np.sum(np.sum( lnjoint*self.ET ))                        
+        lnpCT = np.sum(np.sum( lnjoint*self.E_t ))                        
         return lnpCT      
             
     def post_lnkappa(self):
@@ -125,13 +125,13 @@ class IBCC(object):
         return lnqKappa
     
     def q_ln_t(self):
-        ET = self.ET[self.ET!=0]
+        ET = self.E_t[self.E_t!=0]
         return np.sum( ET*np.log(ET) )
         
     def lowerbound(self, lnjoint):
                         
         #probability of these targets is 1 as they are training labels
-        #lnjoint[self.trainT!=-1,:] -= np.reshape(self.lnkappa, (1,self.nclasses))
+        #lnjoint[self.train_t!=-1,:] -= np.reshape(self.lnkappa, (1,self.nclasses))
         lnpCT = self.post_lnjoint_ct(lnjoint)                    
                         
         #alpha0 = np.reshape(self.alpha0, (self.nclasses, self.nscores, self.K))
@@ -171,7 +171,7 @@ class IBCC(object):
             else:
                 train_t = np.zeros( len(np.unique(self.crowdlabels[:,1])) ) -1
         
-        self.trainT = train_t
+        self.train_t = train_t
         self.N = train_t.shape[0]        
         
     def preprocess_crowdlabels(self):
@@ -219,7 +219,7 @@ class IBCC(object):
         self.preprocess_crowdlabels()
         
         while not converged and self.keeprunning:
-            oldET = self.ET
+            oldET = self.E_t
             #play around with the order you start these in:
             #Either update the params using the priors+training labels for t
             #Or update the targets using the priors for the params
@@ -241,7 +241,7 @@ class IBCC(object):
                 change = L-oldL                
                 oldL = L
             else:
-                change = np.sum(np.sum(np.absolute(oldET - self.ET)))            
+                change = np.sum(np.sum(np.absolute(oldET - self.E_t)))            
             if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>self.min_iterations:
                 converged = True
             self.nIts+=1
@@ -254,7 +254,7 @@ class IBCC(object):
             gc.collect()               
                 
         logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
-        return self.ET
+        return self.E_t
         
     def init_params(self):
         logging.debug('Initialising parameters...') 
@@ -295,7 +295,7 @@ class IBCC(object):
         
     def init_t(self):        
         kappa = self.nu / np.sum(self.nu, axis=0)        
-        self.ET = np.zeros((self.N,self.nclasses)) + kappa  
+        self.E_t = np.zeros((self.N,self.nclasses)) + kappa  
         
     def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, table_format=False, dh=None):
         if dh != None:
