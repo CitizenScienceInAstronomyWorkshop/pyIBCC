@@ -34,7 +34,7 @@ class DataHandler(object):
     input_file = None
     gold_file = None
 
-    nClasses = 2
+    nclasses = 2
     scores = None
     nu0 = None
     alpha0 = None         
@@ -100,9 +100,9 @@ class DataHandler(object):
         self.N = unmappedScores.shape[0]
         self.targetidxs = range(self.N)
                 
-        self.crowdTable = np.zeros((self.N,self.K))
+        self.table_format_flag = np.zeros((self.N,self.K))
         for i,s in enumerate(scores):
-            self.crowdTable[unmappedScores==s] = i
+            self.table_format_flag[unmappedScores==s] = i
         
         maxT = np.max(self.targetidxs)
         blanks = np.zeros(len(self.targetidxs))
@@ -210,7 +210,7 @@ class DataHandler(object):
         self.input_file = inputFile
         self.gold_file = goldFile
         self.scores = scores
-        self.nClasses = nClasses
+        self.nclasses = nClasses
         self.nu0 = nu0
         self.alpha0 = alpha0
     

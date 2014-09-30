@@ -70,14 +70,14 @@ class Evaluator(object):
         plt.savefig(self.outputdir+label+'.png', bbox_inches='tight', \
                     pad_inches=0, transparent=True, dpi=96)
     
-    def getAucs(self, testResults, goldmatrix, nClasses):
+    def getAucs(self, testResults, goldmatrix):
         '''
         Calculate the area under the ROC curve (called AUC) and 
         the area under the precision-recall curve, called the average precision (AP).
         '''
-        auc_result = np.zeros(nClasses-1)
-        ap = np.zeros(nClasses-1)
-        for j in range(nClasses-1):
+        auc_result = np.zeros(self.nclasses-1)
+        ap = np.zeros(self.nclasses-1)
+        for j in range(self.nclasses-1):
             y_true = goldmatrix[:,j]
             y_scores = testResults[:,j]
             #auc[j] = roc_auc_score(y_true, y_scores) #need scikit 0.14. 
@@ -91,9 +91,13 @@ class Evaluator(object):
             print 'tpr: ' + str(tpr[best])
             print 'fpr: ' + str(fpr[best])
                         
-        return (auc_result,ap)
+        if self.nclasses==2:
+            auc_result = auc_result[0]
+            ap = ap[0]
+                        
+        return auc_result, ap
     
-    def getAccMeasures(self, nClasses):
+    def getAccMeasures(self):
         '''
         If testIdxs is not set, we compare against all data points. 
         If testIdxs is set, we ignore other data points, assuming they were part of the training set.
@@ -102,8 +106,8 @@ class Evaluator(object):
         pT_test_pos = self.pT[self.testIdxs,1:]
         labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
         
-        labelMatrix = np.zeros((len(labels),nClasses-1)) 
-        for j in range(1,nClasses):
+        labelMatrix = np.zeros((len(labels),self.nclasses-1)) 
+        for j in range(1,self.nclasses):
             labelMatrix[labels==j,j-1] = 1
                 
         print 'Evaluating the results using the greedy classifications.'
@@ -114,12 +118,12 @@ class Evaluator(object):
         acc = acc[0] #each class column will be the same. Related to a weighted average of precision across all classes
         
         disagreement = abs(labelMatrix-testResults)
-        fn = np.sum(disagreement[labels>=1,:],0)
-        fp = np.sum(disagreement[labels==0,:],0)
+        fn = np.sum(disagreement[labels>=1,:],0)[0]
+        fp = np.sum(disagreement[labels==0,:],0)[0]
         
         agreement = 1-disagreement
-        tp = np.sum(agreement[labels>=1,:],0) 
-        tn = np.sum(agreement[labels==0,:],0)
+        tp = np.sum(agreement[labels>=1,:],0)[0] 
+        tn = np.sum(agreement[labels==0,:],0)[0]
             
         if tp+fn==0:
             print "recall unknown"
@@ -145,14 +149,14 @@ class Evaluator(object):
         print 'Evaluating the results using curves with classification thresholds.'
         if fp+tn==0 or tp+fn==0:
             print 'Incomplete test labels, cannot evaluate AUC'
-            auc = np.zeros(nClasses-1)
-            ap = np.zeros(nClasses-1)
+            auc = np.zeros(self.nclasses-1)
+            ap = np.zeros(self.nclasses-1)
         else:
-            auc, ap = self.getAucs(testResults, labelMatrix, nClasses)        
+            auc, ap = self.getAucs(testResults, labelMatrix)        
             
         return acc,recall,spec,prec,auc,ap,nfiltered,filter_rate
     
-    def plotCumDist(self, nClasses):    
+    def plotCumDist(self):    
         #sort probabilities in order
         #x values are the probabilities
         #y values are indices
@@ -161,7 +165,7 @@ class Evaluator(object):
         
         gold_test = self.dh.goldlabels[self.testIdxs]
         
-        for j in range(1,nClasses):
+        for j in range(1,self.nclasses):
             X = np.sort(self.pT[self.testIdxs,j]).reshape(-1)
             Y = - np.array(range(len(X))) + len(X) 
             plt.figure(self.figure1)
@@ -205,10 +209,7 @@ class Evaluator(object):
             self.write_img("normcumdist_" + str(j) + "_" + self.datalabel, self.figure3)
             
     def printResults(self, meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp,nfiltered,filter_rate):
-        
-        nClasses = len(meanAuc)#combiner.nClasses-1
-        
-        if nClasses > 1:
+        if self.nclasses > 1:
             print '---For each class separately---'
             
             print 'Recall: ' + str(meanRecall)
@@ -222,11 +223,11 @@ class Evaluator(object):
             print '--- Means across all classes ---'
         
         #unweighted average across classes
-        meanAuc = np.sum(meanAuc)/nClasses
-        meanAp = np.sum(meanAp)/nClasses
-        meanRecall = np.sum(meanRecall)/nClasses
-        meanSpecificity = np.sum(meanSpecificity)/nClasses
-        meanPrecision = np.sum(meanPrecision)/nClasses  
+        meanAuc = np.sum(meanAuc)/self.nclasses
+        meanAp = np.sum(meanAp)/self.nclasses
+        meanRecall = np.sum(meanRecall)/self.nclasses
+        meanSpecificity = np.sum(meanSpecificity)/self.nclasses
+        meanPrecision = np.sum(meanPrecision)/self.nclasses  
         
         print 'Mean Accuracy: ' + str(meanAcc)
         print 'Mean Recall: ' + str(meanRecall)
@@ -312,7 +313,8 @@ class Evaluator(object):
         plt.title("Distribution of Volunteers' Detection Rate of " + self.datalabel)
         
         #calculate skill levels
-        alphasum = np.sum(self.combiner.alpha, 1).reshape((self.combiner.nClasses,1,self.combiner.K))
+        original_nclasses = self.combiner.alpha.shape[0] #before we merge subtypes
+        alphasum = np.sum(self.combiner.alpha, 1).reshape((original_nclasses,1,self.combiner.K))
         pi = self.combiner.alpha / alphasum
         skill = pi[1:,0,:] #assumes score 0 is a positive classification
         skill = skill.reshape((skill.shape[0],self.combiner.K))
@@ -321,7 +323,7 @@ class Evaluator(object):
         xidx = np.arange(self.combiner.K, dtype=np.float)
         norm_xidx = xidx/np.float(self.combiner.K)
         
-        if self.combiner.nClasses>2:
+        if original_nclasses>2:
             cats = self.secondary_type_cats
         else:
             cats = [self.secondary_type_cats[0],self.secondary_type_cats[-1]]
@@ -336,7 +338,7 @@ class Evaluator(object):
         self.write_img("volunteeracc_"+self.datalabel, self.skill_fig)
         
         #lnpi = self.combiner.lnPi
-        #lnproportions = self.combiner.lnNu.reshape((self.combiner.nClasses,0,1))
+        #lnproportions = self.combiner.lnNu.reshape((self.nclasses,0,1))
         #pt_given_c = np.exp(lnpi[1:,0,:]+lnproportions[1:,:,:]) / np.exp(np.sum(lnpi[:,0,:]+lnproportions, axis=0))
         
     def printMajorityVoteByType(self):
@@ -443,37 +445,38 @@ class Evaluator(object):
      
         print ' No. test indexes = ' + str(len(self.testIdxs)) + ", with +ve examples " + str(len(np.argwhere(self.dh.goldlabels[self.testIdxs]>0)))
      
-        self.pT = self.combiner.combineClassifications(self.dh.crowdlabels, self.goldTr)
+        self.pT = self.combiner.combine_classifications(self.dh.crowdlabels, self.goldTr)
         print 'Nu: ' + str(self.combiner.nu)  
         
         if self.merge_all_pos:
             self.pT_premerge = self.pT
             self.pT = np.concatenate( (self.pT[:,0].reshape(self.pT.shape[0],1),\
                           np.sum(self.pT[:,1:],1).reshape(self.pT.shape[0],1)), axis=1)
-        nclasses = self.pT.shape[1] 
+        self.nclasses = self.pT.shape[1] 
         #analyse the accuracy of the results
         if not runEvaluation:
             return
         
-        self.plotCumDist(nclasses)        
-        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.getAccMeasures(nclasses)
+        self.plotCumDist()        
+        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.getAccMeasures()
       
         return acc,recall,spec,prec,auc,ap,nfiltered,filter_rate 
     
     def testSchwamb(self):
-        self.combiner, self.dh = ibcc.loadCombiner(self.configfile)
+        self.combiner, self.dh = ibcc.load_combiner(self.configfile)
         self.weightedVoteSchwamb()   
-        nclasses = self.pT.shape[1]                                                        
-        self.plotCumDist(nclasses)
-        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.getAccMeasures(nclasses)
+        self.nclasses = self.pT.shape[1]                                                        
+        self.plotCumDist()
+        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.getAccMeasures()
         self.printResults(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
         result_array = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
         return result_array        
         
     def testUnsupervised(self, runEvaluation=True):
         # no training data, test all points we have true labels for
-        self.combiner, self.dh = ibcc.loadCombiner(self.configfile)        
+        self.combiner, self.dh = ibcc.load_combiner(self.configfile)        
         self.goldTr = np.zeros(len(self.dh.goldlabels)) -1 
+        self.nclasses = self.combiner.nclasses
         
         if runEvaluation:
             acc,recall,spec,prec,auc,ap,nfiltered,filter_rate \
@@ -482,7 +485,7 @@ class Evaluator(object):
             result_array = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
             return result_array
         else:
-            self.testIbccPerformance(runEvaluation=runEvaluation)
+            return self.testIbccPerformance(runEvaluation=runEvaluation)
         
     def discretize_secondary_gold(self):
         '''
@@ -498,9 +501,10 @@ class Evaluator(object):
         
     def testSupervised(self, runEvaluation=True):
         #supply all training data. The metrics will be unfair
-        self.combiner, self.dh = ibcc.loadCombiner(self.configfile)
+        self.combiner, self.dh = ibcc.load_combiner(self.configfile)
+        self.nclasses = self.combiner.nclasses
         
-        if self.dh.goldsubtypes != None and len(self.dh.goldsubtypes)>0 and self.combiner.nClasses>2:
+        if self.dh.goldsubtypes != None and len(self.dh.goldsubtypes)>0 and self.nclasses>2:
             self.discretize_secondary_gold()
             self.goldTr = np.zeros(len(self.dh.goldlabels)) -1
             self.goldTr[self.dh.trainids] = self.disc_gold_types[self.dh.trainids]
@@ -511,12 +515,13 @@ class Evaluator(object):
             self.goldTr = self.dh.goldlabels
         
         if runEvaluation:
-            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.testIbccPerformance(runEvaluation=runEvaluation)
+            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.testIbccPerformance(\
+                                                                        runEvaluation=runEvaluation)
             self.printResults(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
             result_array = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
             return result_array            
         else:
-            self.testIbccPerformance(runEvaluation=runEvaluation)
+            return self.testIbccPerformance(runEvaluation=runEvaluation)
     
     def testXValidation(self, nFolds, configFile):
         '''
@@ -530,13 +535,14 @@ class Evaluator(object):
             return
         
         #load the data
-        self.combiner, self.dh = ibcc.loadCombiner(configFile)        
+        self.combiner, self.dh = ibcc.load_combiner(configFile)
+        self.nclasses = self.combiner.nclasses
         meanAcc = 0
-        meanRecall = np.zeros((1,self.combiner.nClasses-1))
-        meanSpecificity = np.zeros((1, self.combiner.nClasses-1))
-        meanPrecision = np.zeros((1, self.combiner.nClasses-1))
-        meanAuc = np.zeros(self.combiner.nClasses-1)
-        meanAp = np.zeros(self.combiner.nClasses-1)
+        meanRecall = np.zeros((1,self.nclasses-1))
+        meanSpecificity = np.zeros((1, self.nclasses-1))
+        meanPrecision = np.zeros((1, self.nclasses-1))
+        meanAuc = np.zeros(self.nclasses-1)
+        meanAp = np.zeros(self.nclasses-1)
         
         #split the data into nFolds different partitions
         trIdxs = np.argwhere(self.dh.goldlabels>-1)
@@ -575,7 +581,7 @@ class Evaluator(object):
         Find possible new discoveries by extracting positive predictions from unlabelled points,
         and translate back to original IDs for further review
         '''
-        unlab_idxs = np.ones(self.combiner.nObjs)
+        unlab_idxs = np.ones(self.combiner.N)
         unlab_idxs[np.argwhere(self.dh.goldlabels>-1)] = 0
         unlab_idxs = np.argwhere(unlab_idxs)
         
