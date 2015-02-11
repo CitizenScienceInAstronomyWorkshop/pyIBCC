@@ -1,6 +1,7 @@
 '''
 @author: Edwin Simpson
 '''
+import gc
 import sys, logging
 import numpy as np
 from copy import deepcopy
@@ -16,10 +17,8 @@ class IBCC(object):
     max_iterations = 500
     conv_threshold = 0.0001
     
-    table_format_flag = False #crowd labels as a full KxnObjs table? 
-    #Otherwise, use 
-    # a sparse 3-column list, where 1st column=classifier ID, 2nd column = 
-    # obj ID, 3rd column = score.
+    table_format_flag = False  # crowdlabels as a full KxN table? If false, use a sparse 3-column list, where 1st
+    # column=classifier ID, 2nd column = obj ID, 3rd column = score.
     crowdlabels = None
     
     nclasses = None
@@ -36,24 +35,33 @@ class IBCC(object):
     alpha = []
     E_t = []
     
+    #Sparsity handling
     observed_idxs = []
+    full_train_t = [] 
+    full_N = 0
     
     keeprunning = True # set to false causes the combine_classifications method to exit without completing
 
+    conf_mat_ind = []  # indicies into the confusion matrices corresponding to the current set of crowdlabels
+    lnpCT = None  # the joint likelihood (interim value)
+
+    trainidxs = None  # indices into the current dataset
+    testidxs = None
+
     def expec_lnkappa(self):#Posterior Hyperparams
-        sumET = np.sum(self.E_t[self.observed_idxs,:], 0)
+        sumET = np.sum(self.E_t, 0)
         for j in range(self.nclasses):
             self.nu[j] = self.nu0[j] + sumET[j]
         self.lnkappa = psi(self.nu) - psi(np.sum(self.nu))
        
-    def post_Alpha(self):#Posterior Hyperparams -- move back to static IBCC
+    def post_Alpha(self):  # Posterior Hyperparams
         for j in range(self.nclasses):
             for l in range(self.nscores):
                 Tj = self.E_t[:,j].reshape((self.N,1))
                 counts = self.C[l].T.dot(Tj).reshape(-1)
                 self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
        
-    def expec_lnPi(self):#Posterior Hyperparams
+    def expec_lnPi(self):
         self.post_Alpha()
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
@@ -61,53 +69,50 @@ class IBCC(object):
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha
         
     def lnjoint_table(self):
-        lnjoint = np.zeros((self.N, self.nclasses))
-        agentIdx = np.tile(np.transpose(range(self.K)), (self.N,1)) 
-    
+        if self.uselowerbound:
+            idxs = np.ones(self.N, dtype=np.bool)
+        else:  # no need to calculate in full
+            idxs = self.testidxs
         for j in range(self.nclasses):
-            lnjoint[:,j] = np.sum(self.lnPi[j,self.table_format_flag,agentIdx],1) + self.lnkappa[j]
-        return lnjoint
+            data = self.lnPi[j, self.validcrowdlabels, self.validagentidxs]
+            self.lnPi_table[self.valididxs] = data
+            self.lnpCT[idxs, j] = np.sum(self.lnPi_table, 1) + self.lnkappa[j]
+        return self.lnpCT
         
     def lnjoint_sparselist(self):
-        lnjoint = np.zeros((self.N, self.nclasses))
+        if self.conf_mat_ind == []:
+            crowdlabels = self.crowdlabels.astype(int)
+            logging.info("Using only discrete labels at the moment.")
+            self.conf_mat_ind = np.ravel_multi_index((crowdlabels[:, 2], crowdlabels[:, 0]), dims=(self.nscores, self.K))
         for j in range(self.nclasses):
-            data = self.lnPi[j,self.crowdlabels[:,2],self.crowdlabels[:,0]].reshape(-1)
-            rows = self.crowdlabels[:,1].reshape(-1)
-            cols = np.zeros(self.crowdlabels.shape[0])
-            
-            likelihood_j = coo_matrix((data, (rows,cols)), shape=(self.N,1)).todense()
-            lnjoint[:,j] = likelihood_j.reshape(-1) + self.lnkappa[j]      
-        return lnjoint
+            weights = self.lnPi[j, :].ravel()[self.conf_mat_ind]
+            self.lnpCT[:, j] = np.bincount(self.crowdlabels[:, 1], weights=weights, minlength=self.N) + self.lnkappa[j]
+        return self.lnpCT
         
     def lnjoint(self):
-        if self.table_format_flag != None:
+        # Checking type. Subclasses that need other types can override this log joint implementation
+        if self.crowdlabels.dtype != np.int:
+            logging.warning("Converting input data matrix to integers.")
+            self.crowdlabels = self.crowdlabels.astype(int)
+        if self.table_format_flag:
             return self.lnjoint_table()
         else:
             return self.lnjoint_sparselist()
 
     def expec_t(self):
-        
-        self.E_t = np.zeros((self.N, self.nclasses))
-        pT = joint = np.zeros((self.N, self.nclasses))
         lnjoint = self.lnjoint()
-            
+        if not self.uselowerbound:
+            lnjoint = lnjoint[self.testidxs,:]
         #ensure that the values are not too small
-        largest = np.max(lnjoint, 1)
-        for j in range(self.nclasses):
-            joint[:,j] = lnjoint[:,j] - largest
-            
+        largest = np.max(lnjoint, 1)[:, np.newaxis]
+        joint = lnjoint - largest
         joint = np.exp(joint)
-        norma = np.sum(joint, axis=1)
-        for j in range(self.nclasses):
-            pT[:,j] = joint[:,j]/norma
-            self.E_t[:,j] = pT[:,j]
-            
-        for j in range(self.nclasses):            
-            #training labels
-            row = np.zeros((1,self.nclasses))
-            row[0,j] = 1
-            self.E_t[self.train_t==j,:] = row    
-            
+        norma = np.sum(joint, axis=1)[:, np.newaxis]
+        pT = joint / norma
+        if self.uselowerbound:
+            self.E_t[self.testidxs] = pT[self.testidxs, :]
+        else:
+            self.E_t[self.testidxs, :] = pT
         return lnjoint
       
     def post_lnjoint_ct(self, lnjoint):
@@ -157,83 +162,126 @@ class IBCC(object):
         #logging.debug('EEnergy ' + str(EEnergy) + ', H ' + str(H))
         return L
         
-    def preprocess_training(self, crowdlabels, train_t=None):
+    def crowdtable_to_sparselist(self, table):
+        valididxs = np.bitwise_and(np.isfinite(table), table >= 0)
+        agents = np.arange(table.shape[1])[np.newaxis, :]
+        objects = np.arange(table.shape[0])[:, np.newaxis]
+        agents = np.tile(agents, (self.N, 1))
+        objects = np.tile(objects, (1, self.K))
+        agents = agents[valididxs][:, np.newaxis]
+        objects = objects[valididxs][:, np.newaxis]
+        scores = table[valididxs][:, np.newaxis]
+        return np.concatenate((agents, objects, scores), axis=1)
         
-        # Is this necessary? Prevents uncertain labels from crowd!
-        crowdlabels = crowdlabels.astype(int) 
-        self.crowdlabels = crowdlabels
+    def desparsify_crowdlabels(self, crowdlabels):
         if crowdlabels.shape[1]!=3:
             self.table_format_flag = True
-        
-        if train_t==None:
-            if self.table_format_flag:
-                train_t = np.zeros(self.crowdlabels.shape[0]) -1
-            else:
-                train_t = np.zeros( len(np.unique(self.crowdlabels[:,1])) ) -1
-        
-        self.train_t = train_t
-        self.N = train_t.shape[0]        
-        
-    def preprocess_crowdlabels(self):
-        #ensure we don't have a matrix by mistake
-        if not isinstance(self.crowdlabels, np.ndarray):
-            self.crowdlabels = np.array(self.crowdlabels)
+            # First, record which objects were actually observed.
+            self.observed_idxs = np.argwhere(np.nansum(crowdlabels, axis=1) >= 0).reshape(-1)
+            if crowdlabels.shape[0] > len(self.observed_idxs):
+                self.sparse = True
+                self.full_N = crowdlabels.shape[0]
+                # cut out the unobserved data points. We'll put them back in at the end of the classification procedure.
+                crowdlabels = crowdlabels[self.observed_idxs, :]
+        else:
+            self.observed_idxs, mappedidxs = np.unique(crowdlabels[:, 1], return_inverse=True)
+            self.full_N = np.max(crowdlabels[:,1])
+            if self.full_N > len(self.observed_idxs):
+                self.sparse = True
+                # map the IDs so we skip unobserved data points. We'll map back at the end of the classification procedure.
+                crowdlabels[:, 1] = mappedidxs
+        return crowdlabels
+
+    def preprocess_data(self, crowdlabels, train_t=None, testidxs=None):
+        crowdlabels = self.desparsify_crowdlabels(crowdlabels)
+        if train_t != None and self.sparse:
+            self.full_train_t = train_t
+            if self.full_N < len(self.full_train_t):
+                self.full_N = len(self.full_train_t)
+            train_t = train_t[self.observed_idxs]
+        # Find out how much training data and how many total data points we have
+        len_t = 0  # length of the training vector
+        if train_t != None:
+            len_t = train_t.shape[0]
+        len_c = crowdlabels.shape[0]  # length of the crowdlabels
+        if not self.table_format_flag:
+            len_c = np.max(crowdlabels[:, 1])
+        # How many data points in total?
+        if len_c > len_t:
+            self.N = len_c
+        else:
+            self.N = len_t
+        # Make sure that train_t is the right size in case we have passed in a training set for the first idxs
+        if train_t == None:
+            self.train_t = np.zeros(self.N) - 1
+        elif train_t.shape[0] < self.N:
+            extension = np.zeros(self.N - train_t.shape[0]) - 1
+            self.train_t = np.concatenate((train_t, extension))
+        else:
+            self.train_t = train_t
+        # record the test and train idxs
+        self.trainidxs = self.train_t > -1
+        if testidxs != None:
+            self.testidxs = testidxs[self.observed_idxs]
+        else:
+            self.testidxs = np.bitwise_or(np.isnan(self.train_t), self.train_t < 0)
+        # Now preprocess the crowdlabels.
+        #Check that we have the right number of agents/base classifiers, K
+        if self.table_format_flag :
+            newK = crowdlabels.shape[1]
+        else:
+            newK = np.max(crowdlabels[:, 0]) + 1  # +1 since we start from 0
+        if self.K<=newK:
+            self.K = newK
+            self.init_params() 
         C = {}
         if self.table_format_flag:            
             for l in range(self.nscores):
-                Cl = np.zeros(self.crowdlabels.shape)
-                Cl[self.crowdlabels==l] = 1
+                Cl = np.zeros(crowdlabels.shape)
+                Cl[crowdlabels == l] = 1
                 C[l] = Cl
-            self.observed_idxs = np.argwhere(np.sum(self.crowdlabels,axis=1)>=0)             
+            # Handle any sparsity in the crowd labels matrix -- find any missing labels from individual crowd members for the observed objects.
+            # NaNs & -1s are missing labels
+#             if -1 in crowdlabels or np.any(np.isnan(crowdlabels)):
+#                 # It's easier to work with the sparse list format, so convert to that
+#                 crowdlabels = self.crowdtable_to_sparselist(crowdlabels)
+#                 self.table_format_flag = False
         else:            
             for l in range(self.nscores):
-                lIdxs = np.where(self.crowdlabels[:,2]==l)[0]     
+                lIdxs = np.where(crowdlabels[:, 2] == l)[0]
                 data = np.array(np.ones((len(lIdxs),1))).reshape(-1)
-                rows = np.array(self.crowdlabels[lIdxs,1]).reshape(-1)
-                cols = np.array(self.crowdlabels[lIdxs,0]).reshape(-1)     
+                rows = np.array(crowdlabels[lIdxs, 1]).reshape(-1)
+                cols = np.array(crowdlabels[lIdxs, 0]).reshape(-1)
                 Cl = coo_matrix((data,(rows,cols)), shape=(self.N, self.K))
                 C[l] = Cl
-            self.observed_idxs = np.unique(self.crowdlabels[:,1])
         self.C = C
-        
-    def init_K(self):
-        if self.table_format_flag :
-            newK = self.crowdlabels.shape[1]
-        else:
-            newK = np.max(self.crowdlabels[:,0])
-        if self.K<=newK:
-            self.K = newK+1 #+1 since we start from 0
-            self.init_params() 
-    
-    def combine_classifications(self, crowdlabels, train_t=None):
-                
-        self.preprocess_training(crowdlabels, train_t)
+        self.crowdlabels = crowdlabels
+        self.lnpCT = np.zeros((self.N, self.nclasses))
+        if self.table_format_flag:
+            agentIdx = np.tile(np.arange(self.K), (self.N, 1))
+            if self.uselowerbound:
+                self.lnPi_table = np.zeros((self.N, self.K))
+            else:
+                self.lnPi_table = np.zeros((np.sum(self.testidxs), self.K))
+                crowdlabels = crowdlabels[self.testidxs, :]
+            self.valididxs = np.bitwise_and(np.isfinite(crowdlabels), crowdlabels >= 0)
+            self.validcrowdlabels = crowdlabels[self.valididxs].astype(int)
+            self.validagentidxs = agentIdx[self.valididxs].astype(int)
+
+    def combine_classifications(self, crowdlabels, train_t=None, testidxs=None):
+        self.preprocess_data(crowdlabels, train_t, testidxs)
         self.init_t()
-        
-        logging.info('IBCC Combining...')
+        logging.info('IBCC: combining to predict ' + str(np.sum(self.testidxs)) + " test data points...")
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
-        
-        self.init_K()
-        self.preprocess_crowdlabels()
-        
         while not converged and self.keeprunning:
-            oldET = self.E_t
-            #play around with the order you start these in:
-            #Either update the params using the priors+training labels for t
-            #Or update the targets using the priors for the params
-            #Usually prefer the latter so that all data points contribute meaningful info,
-            #since the targets for the test data will be inited only to the kappa-priors, 
-            #and training data is often insufficient -> could lead to biased result 
-
+            oldET = self.E_t.copy()
             #update targets
             lnjoint = self.expec_t() 
-
             #update params
             self.expec_lnkappa()
             self.expec_lnPi()
-        
             #check convergence        
             if self.uselowerbound:
                 L = self.lowerbound(lnjoint)
@@ -241,7 +289,7 @@ class IBCC(object):
                 change = L-oldL                
                 oldL = L
             else:
-                change = np.sum(np.sum(np.absolute(oldET - self.E_t)))            
+                change = np.max(np.sum(np.absolute(oldET - self.E_t)))
             if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>self.min_iterations:
                 converged = True
             self.nIts+=1
@@ -249,11 +297,15 @@ class IBCC(object):
                 logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
             else:
                 logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
-               
-            import gc
-            gc.collect()               
-                
+#             gc.collect()
         logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
+        # Convert back to original idxs in case of unobserved IDs
+        if self.sparse:
+            E_t_full = np.zeros((self.full_N,self.nclasses))
+            E_t_full[:] = (np.exp(self.lnkappa) / np.sum(np.exp(self.lnkappa))).reshape((1, self.nclasses))
+            E_t_full[self.observed_idxs,:] = self.E_t
+            self.E_t_sparse = self.E_t  # save the sparse version
+            self.E_t = E_t_full        
         return self.E_t
         
     def init_params(self):
@@ -267,6 +319,8 @@ class IBCC(object):
     def init_lnkappa(self):
         if self.nu!=[]:
             return
+        # Ensure we have float arrays so we can do division with these parameters properly
+        self.nu0 = self.nu0.astype(float)
         self.nu = deepcopy(np.float64(self.nu0))
         sumNu = np.sum(self.nu)
         self.lnkappa = psi(self.nu) - psi(sumNu)
@@ -274,6 +328,7 @@ class IBCC(object):
     def init_lnPi(self):
         if self.alpha!=[] and self.alpha.shape[2]==self.K:
             return
+        self.alpha0 = self.alpha0.astype(float)
         if len(self.alpha0.shape)<3:
             self.alpha0 = np.array(self.alpha0[:,:,np.newaxis], dtype=np.float64)
             self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
@@ -284,7 +339,7 @@ class IBCC(object):
             alpha0new = alpha0new[:,:,np.newaxis]
             alpha0new = np.repeat(alpha0new, nnew, axis=2)
             self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
-            
+        # Ensure we have a float so we can do arithmetic with alpha0 and alpha
         self.alpha = deepcopy(np.float64(self.alpha0))#np.float64(self.alpha0[:,:,np.newaxis])
 
         sumAlpha = np.sum(self.alpha, 1)
@@ -294,8 +349,25 @@ class IBCC(object):
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha 
         
     def init_t(self):        
-        kappa = self.nu / np.sum(self.nu, axis=0)        
-        self.E_t = np.zeros((self.N,self.nclasses)) + kappa  
+        kappa = self.nu / np.sum(self.nu, axis=0)
+        if len(self.E_t) > 0:
+            if self.sparse:
+                oldE_t = self.E_t_sparse
+            else:
+                oldE_t = self.E_t
+            Nold = oldE_t.shape[0]
+            if Nold > self.N:
+                Nold = self.N
+        else:
+            oldE_t = []
+        self.E_t = np.zeros((self.N, self.nclasses)) + kappa
+        if len(oldE_t) > 0:
+            self.E_t[0:Nold, :] = oldE_t[0:Nold, :]
+        for j in range(self.nclasses):
+            # training labels
+            row = np.zeros((1, self.nclasses))
+            row[0, j] = 1
+            self.E_t[self.train_t == j, :] = row
         
     def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, table_format=False, dh=None):
         if dh != None:
@@ -312,7 +384,7 @@ class IBCC(object):
             self.nu0 = nu0
             self.K = K
         
-        self.init_params()
+#         self.init_params()
         if table_format:
             self.table_format_flag = True
         else:

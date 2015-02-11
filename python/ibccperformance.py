@@ -81,15 +81,15 @@ class Evaluator(object):
             y_true = goldmatrix[:,j]
             y_scores = testResults[:,j]
             #auc[j] = roc_auc_score(y_true, y_scores) #need scikit 0.14. 
-            fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=1)
-            auc_result[j] = auc(fpr, tpr)
+            FPR, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=1)
+            auc_result[j] = auc(FPR, tpr)
             ap[j] = average_precision_score(y_true, y_scores)
                         
-            diffs = tpr-fpr
+            diffs = tpr-FPR
             best = np.argmax(diffs)
             print  'The best threshold is ' + str(thresholds[best]) + ' at diff of ' + str(np.max(diffs))       
             print 'tpr: ' + str(tpr[best])
-            print 'fpr: ' + str(fpr[best])
+            print 'FPR: ' + str(FPR[best])
                         
         if self.nclasses==2:
             auc_result = auc_result[0]
