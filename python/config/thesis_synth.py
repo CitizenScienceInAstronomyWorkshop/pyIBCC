@@ -2,7 +2,7 @@ import numpy as np
 
 print 'Configuring IBCC'
 
-def translateGold(gold):
+def translate_gold(gold):
     #turn the EBs and simulations into instances of "planet"
     from copy import deepcopy
     translated = deepcopy(gold)

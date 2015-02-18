@@ -14,6 +14,8 @@ from copy import deepcopy
 
 class Evaluator(object):
 
+    nclasses = 2
+    
     figure1 = 1
     figure2 = 2
     figure3 = 3
@@ -33,7 +35,7 @@ class Evaluator(object):
     testIdxs = []
     trIdxs = []
     
-    goldTr = [] #gold labels for training
+    gold_tr = [] #gold labels for training
     goldsubtypes = [] # sub-types of the classes
     disc_gold_types = []
     
@@ -70,16 +72,24 @@ class Evaluator(object):
         plt.savefig(self.outputdir+label+'.png', bbox_inches='tight', \
                     pad_inches=0, transparent=True, dpi=96)
     
-    def getAucs(self, testResults, goldmatrix):
+    def eval_auc(self, testresults=[], labels=[]):
         '''
         Calculate the area under the ROC curve (called AUC) and 
         the area under the precision-recall curve, called the average precision (AP).
         '''
+        if testresults==[]:
+            testresults = self.pT[self.testIdxs,1:]
+        if labels==[]:
+            labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
+        labelmatrix = np.zeros((len(labels),self.nclasses-1)) 
+        for j in range(1,self.nclasses):
+            labelmatrix[labels==j,j-1] = 1
+        
         auc_result = np.zeros(self.nclasses-1)
         ap = np.zeros(self.nclasses-1)
         for j in range(self.nclasses-1):
-            y_true = goldmatrix[:,j]
-            y_scores = testResults[:,j]
+            y_true = labelmatrix[:,j]
+            y_scores = testresults[:,j]
             #auc[j] = roc_auc_score(y_true, y_scores) #need scikit 0.14. 
             fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=1)
             auc_result[j] = auc(fpr, tpr)
@@ -97,33 +107,45 @@ class Evaluator(object):
                         
         return auc_result, ap
     
-    def getAccMeasures(self):
+    def eval_crossentropy(self, testresults=[], labels=[]):
+        if testresults==[]:
+            testresults = self.pT[self.testIdxs,:]
+        elif testresults.ndim==1:
+            testresults.shape = (testresults.size,1)
+            testresults = np.concatenate((testresults,1-testresults), axis=1)             
+        if labels==[]:
+            labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
+                
+        crossentropy = -np.log(testresults[:,labels])
+        infidxs = np.isinf(crossentropy)
+        print "number of infinite entropy data points: " + str(np.sum(infidxs==True))
+        crossentropy[infidxs] = -np.log(0.0000001)
+        print "number of cross entropy points: " + str(crossentropy.size)
+        crossentropy = np.sum(crossentropy)/labels.size
+        return crossentropy    
+    
+    def eval_results(self):
         '''
         If testIdxs is not set, we compare against all data points. 
         If testIdxs is set, we ignore other data points, assuming they were part of the training set.
         '''
         
-        pT_test_pos = self.pT[self.testIdxs,1:]
         labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
-        
-        labelMatrix = np.zeros((len(labels),self.nclasses-1)) 
-        for j in range(1,self.nclasses):
-            labelMatrix[labels==j,j-1] = 1
-                
+                        
         print 'Evaluating the results using the greedy classifications.'
-        testResults = np.round(pT_test_pos)
+        greedyresults = np.argmax(self.pT[self.testIdxs,:])#np.round(pT_test_pos)
         
-        acc = 1 - np.sum(abs(labelMatrix-testResults), 0) / len(self.testIdxs)
+        acc = 1 - np.sum(labels!=greedyresults, 0) / len(self.testIdxs)
         print 'acc: ' + str(acc)
-        acc = acc[0] #each class column will be the same. Related to a weighted average of precision across all classes
+        #each class column will be the same. Related to a weighted average of precision across all classes
         
-        disagreement = abs(labelMatrix-testResults)
-        fn = np.sum(disagreement[labels>=1,:],0)[0]
-        fp = np.sum(disagreement[labels==0,:],0)[0]
+        disagreement = labels!=greedyresults
+        fn = np.sum(disagreement[labels>=1],0)[0]
+        fp = np.sum(disagreement[labels==0],0)[0]
         
-        agreement = 1-disagreement
-        tp = np.sum(agreement[labels>=1,:],0)[0] 
-        tn = np.sum(agreement[labels==0,:],0)[0]
+        agreement = labels==greedyresults
+        tp = np.sum(agreement[labels>=1],0)[0] 
+        tn = np.sum(agreement[labels==0],0)[0]
             
         if tp+fn==0:
             print "recall unknown"
@@ -152,11 +174,11 @@ class Evaluator(object):
             auc = np.zeros(self.nclasses-1)
             ap = np.zeros(self.nclasses-1)
         else:
-            auc, ap = self.getAucs(testResults, labelMatrix)        
+            auc, ap = self.eval_auc()        
             
         return acc,recall,spec,prec,auc,ap,nfiltered,filter_rate
     
-    def plotCumDist(self):    
+    def plot_cum_dist(self):    
         #sort probabilities in order
         #x values are the probabilities
         #y values are indices
@@ -208,7 +230,7 @@ class Evaluator(object):
             
             self.write_img("normcumdist_" + str(j) + "_" + self.datalabel, self.figure3)
             
-    def printResults(self, meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp,nfiltered,filter_rate):
+    def print_results(self, meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp,nfiltered,filter_rate):
         if self.nclasses > 1:
             print '---For each class separately---'
             
@@ -238,7 +260,7 @@ class Evaluator(object):
         print "Mean no. data points marked positive: " + str(nfiltered)
         print "Mean fraction marked as positive: " + str(filter_rate)
         
-    def plotRecallByRadius(self, seqno):
+    def plot_recall_by_type(self, seqno):
     
         cols = ['r','y','b','m','g']
         tvals = self.secondary_type_cats[1:]
@@ -341,7 +363,7 @@ class Evaluator(object):
         #lnproportions = self.combiner.lnNu.reshape((self.nclasses,0,1))
         #pt_given_c = np.exp(lnpi[1:,0,:]+lnproportions[1:,:,:]) / np.exp(np.sum(lnpi[:,0,:]+lnproportions, axis=0))
         
-    def printMajorityVoteByType(self):
+    def print_mv_by_type(self):
         tVals = self.secondary_type_cats[1:]
         start = 2      
            
@@ -373,80 +395,18 @@ class Evaluator(object):
                 bigPlanetIds = idxs[greedyLabels==0]
                  
         return bigPlanetIds   
-    
-    def weightedVoteSchwamb(self):
-        #this is incomplete as we don't do the second stage to label users who have not seen any 
-        #simulations. When running this to filter simluations only, it is unfair to compare 
-        #the paper's results with IBCC, since this method uses the test data to do training....
-        #The iterative, semi-supervised nature of this method mean it is more like IBCC than it first seems.
-        kIdxs = np.unique(self.dh.crowdlabels[:,0])
         
-        #counts per agent
-        nCorrect = np.zeros(len(kIdxs))
-        
-        #values per data point
-        detectionrate = np.zeros(len(self.dh.goldlabels))
-        nClassifiers = np.zeros(len(self.dh.goldlabels))
-        
-        for l in range(self.dh.crowdlabels.shape[0]):
-            #for each label provided by crowd
-            if self.dh.crowdlabels[l,1] not in self.testIdxs:
-                #training labels
-                k = int(self.dh.crowdlabels[l,0])
-                i = int(self.dh.crowdlabels[l,1])
-                        
-                #positive examples in training set
-                if self.dh.goldlabels[i]==1:
-                    #assumes 0 is positive!!!
-                    nCorrect[k] += self.dh.crowdlabels[l,2]==0 
-                    detectionrate[i] += self.dh.crowdlabels[l,2]==0 
-                    nClassifiers[i] += 1
-                else:
-                    nClassifiers[i] += 1
-            else:
-                i = int(self.dh.crowdlabels[l,1])
-                nClassifiers[i] +=1
-                    
-        print 'Fraction of candidates with >=5 classifications: ' + \
-                str(float(np.sum(nClassifiers>=5))/float(len(self.dh.goldlabels)))
-                    
-        detectionrate = np.divide(detectionrate, nClassifiers)
-        errors = np.zeros(len(kIdxs)) 
-        for l in range(self.dh.crowdlabels.shape[0]):
-            #for all labels with corresponding training
-            if self.dh.crowdlabels[l,1] not in self.testIdxs:
-                k = int(self.dh.crowdlabels[l,0])
-                i = int(self.dh.crowdlabels[l,1])
-                if self.dh.goldlabels[i]==1:  #positive training examples
-                    errors[k] += 0.2*detectionrate[i]* (self.dh.crowdlabels[l,2]==1)
-        
-        weights = np.ones(len(kIdxs)) + nCorrect - errors 
-        weights = weights - np.min(weights)
-        weights = np.divide(weights, np.max(weights))
-        
-        pTVote = np.ones((len(self.dh.goldlabels),2))
-        for l in range(self.dh.crowdlabels.shape[0]):
-            i = int(self.dh.crowdlabels[l,1])
-            k = int(self.dh.crowdlabels[l,0])
-            v = self.dh.crowdlabels[l,2]==0
-            if v:
-                pTVote[i,1]+=weights[k]
-            else:
-                pTVote[i,0]+=weights[k]
-        pTVote = np.divide(pTVote, np.sum(pTVote,axis=1).reshape(pTVote.shape[0],1))
-        self.pT = pTVote
-    
-    def testIbccPerformance(self, runEvaluation=True):
+    def run_test(self, evaluate=True):
         #An alternative to the runIbcc function in the Ibcc module, which does not save the resulting 
         #classifications, but prints a performance analysis
         if self.testIdxs==None or self.testIdxs==[]:
-            self.testIdxs = np.argwhere(np.bitwise_and(self.dh.goldlabels>-1,self.goldTr==-1))
+            self.testIdxs = np.argwhere(np.bitwise_and(self.dh.goldlabels>-1,self.gold_tr==-1))
             self.testIdxs = self.testIdxs.reshape(-1)
      
         print ' No. test indexes = ' + str(len(self.testIdxs)) + ", with +ve examples " + str(len(np.argwhere(self.dh.goldlabels[self.testIdxs]>0)))
      
-        self.pT = self.combiner.combine_classifications(self.dh.crowdlabels, self.goldTr)
-        print 'Nu: ' + str(self.combiner.nu)  
+        self.pT = self.combiner.combine_classifications(self.dh.crowdlabels, self.gold_tr)
+        self.dh.save_hyperparams(self.combiner.alpha, self.combiner.nu, self.combiner.noptiter)
         
         if self.merge_all_pos:
             self.pT_premerge = self.pT
@@ -454,39 +414,108 @@ class Evaluator(object):
                           np.sum(self.pT[:,1:],1).reshape(self.pT.shape[0],1)), axis=1)
         self.nclasses = self.pT.shape[1] 
         #analyse the accuracy of the results
-        if not runEvaluation:
+        if not evaluate:
             return
         
-        self.plotCumDist()        
-        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.getAccMeasures()
+        self.plot_cum_dist()        
+        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.eval_results()
       
-        return acc,recall,spec,prec,auc,ap,nfiltered,filter_rate 
-    
-    def testSchwamb(self):
-        self.combiner, self.dh = ibcc.load_combiner(self.configfile)
-        self.weightedVoteSchwamb()   
-        self.nclasses = self.pT.shape[1]                                                        
-        self.plotCumDist()
-        acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.getAccMeasures()
-        self.printResults(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
-        result_array = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
-        return result_array        
+        return acc,recall,spec,prec,auc,ap,nfiltered,filter_rate    
         
-    def testUnsupervised(self, runEvaluation=True):
+    def test_unsupervised(self, evaluate=True):
         # no training data, test all points we have true labels for
         self.combiner, self.dh = ibcc.load_combiner(self.configfile)        
-        self.goldTr = np.zeros(len(self.dh.goldlabels)) -1 
+        self.gold_tr = np.zeros(len(self.dh.goldlabels)) -1 
         self.nclasses = self.combiner.nclasses
         
-        if runEvaluation:
+        if evaluate:
             acc,recall,spec,prec,auc,ap,nfiltered,filter_rate \
-                = self.testIbccPerformance(runEvaluation=runEvaluation)
-            self.printResults(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
-            result_array = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
-            return result_array
+                = self.run_test(evaluate=evaluate)
+            self.print_results(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
         else:
-            return self.testIbccPerformance(runEvaluation=runEvaluation)
+            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.run_test(evaluate=evaluate)
         
+        result_array = self.make_result_list(acc, recall, spec, prec, auc, ap, nfiltered, filter_rate)
+        return result_array
+        
+    def test_supervised(self, evaluate=True):
+        #supply all training data. The metrics will be unfair
+        if self.combiner==None:
+            self.load_supervised()
+        
+        if evaluate:
+            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.run_test(evaluate=evaluate)
+            self.print_results(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
+        else:
+            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.run_test(evaluate=evaluate)
+
+        result_array = self.make_result_list(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
+        return result_array            
+    
+    def load_supervised(self):
+        self.combiner, self.dh = ibcc.load_combiner(self.configfile)
+        self.nclasses = self.combiner.nclasses
+        
+        if self.dh.goldsubtypes != None and len(self.dh.goldsubtypes)>0 and self.nclasses>2:
+            self.discretize_secondary_gold()
+            self.gold_tr = np.zeros(len(self.dh.goldlabels)) -1
+            self.gold_tr[self.dh.trainids] = self.disc_gold_types[self.dh.trainids]
+        elif self.dh.trainids != None:
+            self.gold_tr = np.zeros(len(self.dh.goldlabels)) -1
+            self.gold_tr[self.dh.trainids] = self.dh.goldlabels[self.dh.trainids]
+        else:
+            self.gold_tr = self.dh.goldlabels        
+    
+    def test_x_validation(self, nfolds):
+        '''
+        Run n-fold cross validation
+        '''
+        if nfolds==0:
+            self.test_supervised()
+            return
+        elif nfolds==1:
+            self.test_unsupervised()
+            return
+        
+        #load the data
+        self.load_supervised()
+        all_trainids = np.argwhere(self.gold_tr!=-1) #save the complete set of training labels
+        kf = KFold(len(all_trainids), n_folds=nfolds, indices=False)#split the data into nfolds       
+
+        result_array = None
+        
+        #for each partition, run IBCC
+        #any unlabelled data is included and is not split
+        for trMask, _ in kf:
+            gold_tr_k = np.zeros(len(self.dh.goldlabels)) -1 
+            gold_tr_k[all_trainids[trMask]] = self.dh.goldlabels[all_trainids[trMask]]
+            self.gold_tr = gold_tr_k
+            self.testIdxs = None
+            
+            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.run_test()  
+            
+            #save to overall summary
+            result_array_k = np.array(self.make_result_list(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate))
+            result_array_k = result_array_k.reshape(1,result_array_k.size)
+            if result_array==None:
+                result_array = result_array_k
+            else:
+                result_array = np.concatenate((result_array,result_array_k), axis=0)
+                  
+        meanresults = np.sum(result_array,axis=0)/nfolds
+                    
+        meanacc = meanresults[0]
+        meanrecall = meanresults[1]
+        meanspec = meanresults[2]
+        meanprec = meanresults[3]
+        meanAuc = meanresults[4]
+        meanAp = meanresults[5]
+        meannfil = meanresults[6]
+        meanfilrate = meanresults[7]
+        
+        #display summary of results across all folds
+        self.print_results(meanacc,meanrecall,meanspec,meanprec,meanAuc,meanAp,meannfil,meanfilrate)
+
     def discretize_secondary_gold(self):
         '''
         Turn continuous feature values into discrete types that can be used as classes for training
@@ -498,83 +527,18 @@ class Evaluator(object):
             
             this_type = np.bitwise_and(self.dh.goldsubtypes<end, self.dh.goldsubtypes>=start)
             self.disc_gold_types[this_type] = i
-        
-    def testSupervised(self, runEvaluation=True):
-        #supply all training data. The metrics will be unfair
-        self.combiner, self.dh = ibcc.load_combiner(self.configfile)
-        self.nclasses = self.combiner.nclasses
-        
-        if self.dh.goldsubtypes != None and len(self.dh.goldsubtypes)>0 and self.nclasses>2:
-            self.discretize_secondary_gold()
-            self.goldTr = np.zeros(len(self.dh.goldlabels)) -1
-            self.goldTr[self.dh.trainids] = self.disc_gold_types[self.dh.trainids]
-        elif self.dh.trainids != None:
-            self.goldTr = np.zeros(len(self.dh.goldlabels)) -1
-            self.goldTr[self.dh.trainids] = self.dh.goldlabels[self.dh.trainids]
-        else:
-            self.goldTr = self.dh.goldlabels
-        
-        if runEvaluation:
-            acc,recall,spec,prec,auc,ap,nfiltered,filter_rate = self.testIbccPerformance(\
-                                                                        runEvaluation=runEvaluation)
-            self.printResults(acc,recall,spec,prec,auc,ap,nfiltered,filter_rate)
-            result_array = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
-            return result_array            
-        else:
-            return self.testIbccPerformance(runEvaluation=runEvaluation)
     
-    def testXValidation(self, nFolds, configFile):
-        '''
-        Run n-fold cross validation
-        '''
-        if nFolds==0:
-            self.testSupervised(configFile)
-            return
-        elif nFolds==1:
-            self.testUnsupervised(configFile)
-            return
-        
-        #load the data
-        self.combiner, self.dh = ibcc.load_combiner(configFile)
-        self.nclasses = self.combiner.nclasses
-        meanAcc = 0
-        meanRecall = np.zeros((1,self.nclasses-1))
-        meanSpecificity = np.zeros((1, self.nclasses-1))
-        meanPrecision = np.zeros((1, self.nclasses-1))
-        meanAuc = np.zeros(self.nclasses-1)
-        meanAp = np.zeros(self.nclasses-1)
-        
-        #split the data into nFolds different partitions
-        trIdxs = np.argwhere(self.dh.goldlabels>-1)
-        
-        kf = KFold(len(trIdxs), n_folds=nFolds, indices=False)      
-        
-        #for each partition, run IBCC
-        #any unlabelled data is included and is not split
-        for trMask, testMask in kf:
-            goldPartition = np.zeros(len(self.dh.goldlabels)) -1 
-            goldPartition[trIdxs[trMask]] = self.dh.goldlabels[trIdxs[trMask]]
-            self.goldTr = goldPartition
-            self.testIdxs = trIdxs[testMask].reshape(-1)
-            
-            _,_,acc,recall,spec,prec,auc,ap = self.testIbccPerformance()  
-            
-            #save to overall summary
-            meanAcc += acc
-            meanRecall += recall,
-            meanSpecificity += spec
-            meanPrecision += prec
-            meanAuc += auc
-            meanAp += ap
-                    
-        meanAcc /= nFolds
-        meanRecall /= nFolds
-        meanSpecificity /= nFolds
-        meanPrecision /= nFolds
-        meanAuc /= nFolds
-        meanAp /= nFolds
-        #display summary of results across all folds
-        self.printResults(meanAcc,meanRecall,meanSpecificity,meanPrecision,meanAuc,meanAp,0,0)
+    def make_result_list(self, acc,recall,spec,prec,auc,ap,nfiltered,filter_rate):
+                
+        results = [acc,recall,spec,prec,auc,ap,nfiltered,filter_rate]
+                
+        for i, item in enumerate(results):
+            if type(item)==np.ndarray:
+                if len(item)<=1:
+                    results[i] = item[0]
+                else:
+                    results[i] = item.tolist()
+        return results
         
     def extract_new_discoveries(self):
         '''
@@ -592,4 +556,4 @@ class Evaluator(object):
         disco_orig_idxs = self.dh.targetidxs[disco_idxs]
         np.savetxt(self.outputdir+"/possible_discoveries.csv", disco_orig_idxs)
             
-    #testXValidation('./config/my_project.py')
+    #test_x_validation('./config/my_project.py')

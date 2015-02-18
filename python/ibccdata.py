@@ -13,6 +13,16 @@ class DataHandler(object):
     classdocs
     '''
 
+    #default values ####################
+    scores = np.array([3, 4])
+    K = 0
+    N = 0
+    nclasses = 2
+    nu0 = np.array([50.0, 50.0])
+    alpha0 = np.array([[2, 1], [1, 2]])  
+
+    ####################################
+
     crowdlabels = None
     table_format = False
     
@@ -20,12 +30,7 @@ class DataHandler(object):
     targetidxs = None
     max_targetid = 0
     trainids = None
-    
-    scores = None
-    
-    K = 0
-    N = 0
-    
+
     goldlabels = None
     goldsubtypes = None
     
@@ -33,11 +38,7 @@ class DataHandler(object):
     confmat_file = None
     input_file = None
     gold_file = None
-
-    nclasses = 2
-    scores = None
-    nu0 = None
-    alpha0 = None         
+    hyperparam_file = None
 
     def __init__(self):
         '''
@@ -168,6 +169,8 @@ class DataHandler(object):
         
     def loadData(self, configFile):
         
+        testid="unknowntest"
+        
         #Defaults that will usually be overwritten by project config
         tableFormat = False
         #columns in input file:
@@ -178,7 +181,7 @@ class DataHandler(object):
         #columns in gold file
         # 0 = object ID
         # 1 = class label
-        scores = np.array([3, 4])
+        scores = self.scores
         
         classLabels = None
       
@@ -188,25 +191,27 @@ class DataHandler(object):
         #-1 means no such info
         goldTypeCol = -1
         
-        def translateGold(gold):
+        def translate_gold(gold):
             return gold
         
-        outputFile = './output/output.csv'
-        confMatFile = None#'./output/confMat.csv'
+        outputFile = './output/output_%s.csv'
+        confMatFile = ''#'./output/confMat.csv'
+        hyperparam_file = ''
         inputFile = './data/input.csv'
         goldFile = './data/gold.csv'
         
         nClasses = 2
-        nu0 = np.array([50.0, 50.0])
-        alpha0 = np.array([[2, 1], [1, 2]])     
+        nu0 = self.nu0
+        alpha0 = self.alpha0 
         
         #read configuration
         with open(configFile, 'r') as conf:
             configuration = conf.read()
             exec(configuration)
             
-        self.output_file = outputFile
-        self.confmat_file = confMatFile
+        self.output_file = outputFile % testid
+        self.confmat_file = confMatFile % testid
+        self.hyperparam_file = hyperparam_file  % testid
         self.input_file = inputFile
         self.gold_file = goldFile
         self.scores = scores
@@ -223,7 +228,7 @@ class DataHandler(object):
         #load gold labels if present
         self.loadGold(classLabels, goldTypeCol)
             
-        self.goldlabels = translateGold(self.goldlabels)
+        self.goldlabels = translate_gold(self.goldlabels)
         
         #map the training IDs to our local indexes
         if trainIds != None:
@@ -231,7 +236,7 @@ class DataHandler(object):
         
         self.table_format = tableFormat
             
-    def saveTargets(self, pT):
+    def save_targets(self, pT):
         #write predicted class labels to file
         logging.info('writing results to file')
         logging.debug('Posterior matrix: ' + str(pT.shape))
@@ -239,18 +244,38 @@ class DataHandler(object):
         logging.debug('Target indexes: ' + str(tIdxs.shape))    
         np.savetxt(self.output_file, np.concatenate([tIdxs, pT], 1))
     
-    def save_pi(self, alpha, nClasses, nScores):
+    def save_pi(self, alpha):
         #write confusion matrices to file if required
-        if self.confmat_file is None:
+        if self.confmat_file is None or self.confmat_file=='':
             return
+        
+        nscores = self.scores.size
     
         logging.info('writing confusion matrices to file')
         pi = np.zeros(alpha.shape)
-        for l in range(nScores):
+        for l in range(nscores):
             pi[:,l,:] = alpha[:,l,:]/np.sum(alpha,1)
         
-        flatPi = pi.reshape(1, nClasses*nScores, alpha.shape[2])
+        flatPi = pi.reshape(1, self.nclasses*nscores, alpha.shape[2])
         flatPi = np.swapaxes(flatPi, 0, 2)
-        np.savetxt(self.confmat_file, flatPi.reshape(alpha.shape[2], nClasses*nScores), fmt='%1.3f')    
+        flatPi = flatPi.reshape(alpha.shape[2], self.nclasses*nscores)
+        np.savetxt(self.confmat_file, flatPi, fmt='%1.3f')
         
+    def save_hyperparams(self, alpha, nu, niterations):    
+        if self.hyperparam_file is None or self.hyperparam_file=='':
+            return
         
+        nscores = self.scores.size
+        logging.info('writing hyperparameters to file')
+        flatalpha = np.swapaxes(alpha, 0, 2)
+        flatalpha = flatalpha.flatten()
+        flatalpha = flatalpha.reshape(alpha.shape[2], self.nclasses*nscores)
+        
+        np.savetxt(self.hyperparam_file, flatalpha, fmt='%1.3f')
+        
+        nu = nu.flatten()
+        others = []
+        others.append(niterations)
+        for nuj in nu:
+            others.append(nuj)
+        np.savetxt(self.hyperparam_file+"_others.csv", others, fmt='%1.3f')
