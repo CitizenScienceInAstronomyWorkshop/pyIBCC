@@ -29,8 +29,113 @@ class DynIBCC(ibcc.IBCC):
         
     samples_per_timestep = 1  # the number of data points that belong to a single timestep. Increase this if a regular
     # number of data points occur at the same time -- it assumes they have the same confusion matrix.
+    sample_bins = []  # records the number of data points in each timestep in case some responses are missing
     Tau = 1 # the total number of responses from all crowd members
+# Initialisation ---------------------------------------------------------------------------------------------------
+    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, table_format=False, dh=None, samples_per_timestep=1, sample_bins=None):
+        super(DynIBCC, self).__init__(nclasses, nscores, alpha0, nu0, K, table_format, dh)
+        self.samples_per_timestep = float(samples_per_timestep)  # don't need to set this if sample_bins is predefined
+        self.sample_bins = sample_bins
 
+    def init_lnPi(self):
+        if self.alpha != []:
+            return  # the basic initialisation was done when comine_classifications was called on a previous dataset
+        self.alpha0 = self.alpha0.astype(float)
+        if hasattr(self.alpha0, 'ndim') and self.alpha0.ndim == 3:
+            # we've already done the basic initialisation
+            return
+        # usually we input a 2-D matrix that we'll copy for all timesteps
+        self.alpha0 = np.array(self.alpha0)
+        if len(self.alpha0.shape) < 3:
+            self.alpha0 = self.alpha0[:, :, np.newaxis]
+        sumAlpha = np.sum(self.alpha0, 1)
+        psiSumAlpha = psi(sumAlpha)
+        self.lnPi = psi(self.alpha0) - psiSumAlpha
+# Data preprocessing and helper functions --------------------------------------------------------------------------
+    def desparsify_crowdlabels(self, crowdlabels):
+        if crowdlabels.shape[1] != 3:
+            self.table_format_flag = True
+            # First, record which objects were actually observed.
+            self.observed_idxs = np.argwhere(np.nansum(crowdlabels, axis=1) >= 0).reshape(-1)
+            self.full_N = crowdlabels.shape[0]
+        else:
+            self.observed_idxs, mappedidxs = np.unique(crowdlabels[:, 1], return_inverse=True)
+            self.full_N = np.max(crowdlabels[:, 1])
+        windows = np.arange(np.ceil(self.full_N / self.samples_per_timestep), dtype=np.int)
+        windows = np.tile(windows, (self.samples_per_timestep, 1)).flatten('F')
+        windows = windows[self.observed_idxs]
+        self.windows = windows
+        bincounts = np.bincount(windows)
+        self.sample_bins = bincounts[windows]
+        if self.full_N > len(self.observed_idxs):
+            self.sparse = True
+            # cut out the unobserved data points. We'll put them back in at the end of the classification procedure.
+            if self.table_format_flag:
+                crowdlabels = crowdlabels[self.observed_idxs, :]
+            else:
+                # map the IDs so we skip unobserved data points. We'll map back at the end of the classification procedure.
+                crowdlabels[:, 1] = mappedidxs
+        return crowdlabels
+
+    def preprocess_data(self, crowdlabels, train_t=None, testidxs=None):
+        '''
+        When crowd labels are supplied in table format, we assume that the responses from members of the crowd were all
+        submitted concurrently in the same order as the objects are listed in the table.
+        '''
+        super(DynIBCC, self).preprocess_data(crowdlabels, train_t, testidxs)
+        # Sort out the confusion matrices. In the dynamic case, there is one for every crowdsourced label!
+#         if self.table_format_flag and np.any(np.bitwise_or(np.isnan(self.crowdlabels), self.crowdlabels < 0)):  # best to work with a sparse list in the dynamic case
+#             self.crowdlabels = self.crowdtable_to_sparselist(self.crowdlabels)
+#             self.table_format_flag = False
+        if self.table_format_flag:
+            self.Tau = self.crowdlabels.shape[0] * self.crowdlabels.shape[1]
+        else:
+            self.Tau = self.crowdlabels.shape[0]
+        # indexes for calculating the joint likelihood efficiently
+        timeidxs = np.tile(np.arange(self.N).reshape((self.N, 1)), (1, self.K))
+        timeidxs = timeidxs[self.test_crowdlabel_idxs].astype(int)
+        self.tauidxs = np.ravel_multi_index((self.test_agent_idxs, timeidxs), (self.K, self.N))
+        # Once we have the dataset to classify, we can determine the number of timesteps self.Tau, which we need to
+        # expand lnPi to the correct number of matrices.
+        if self.alpha != [] and self.alpha.shape[2] < self.Tau:
+            # Case where we have already run this combiner with fewer timesteps
+            oldTau = self.alpha0.shape[2]
+            # Expand the prior
+            ending = self.alpha0[:, :, oldTau - 1][:, :, np.newaxis]
+            ending = np.repeat(ending, self.Tau - oldTau, axis=2)
+            self.alpha0 = np.concatenate((self.alpha0, ending), axis=2)
+            # Do the same for the posterior
+            ending = self.alpha[:, :, oldTau - 1][:, :, np.newaxis]
+            ending = np.repeat(ending, self.Tau - oldTau, axis=2)
+            self.alpha = np.concatenate((self.alpha, ending), axis=2)
+            # And the same for lnpi
+            ending = self.lnPi[:, :, oldTau - 1][:, :, np.newaxis]
+            ending = np.repeat(ending, self.Tau - oldTau, axis=2)
+            self.lnPi = np.concatenate((self.lnPi, ending), axis=2)
+        elif self.alpha != [] and self.alpha.shape[2] > self.Tau:
+            # The new dataset has fewer items than before
+            self.alpha0[:, :, 0:self.Tau]
+            self.alpha[:, :, 0:self.Tau]
+            self.lnPi[:, :, 0:self.Tau]
+        elif self.alpha0.shape[2] > 1:
+            # Haven't run the combiner yet, so need to expand from the first matrix
+            # Find the number of new alpha0 needed. We can pass in multiple at the start, but if not enough, we'll
+            # duplicate the first alpha0.
+            nduplicates = self.Tau - self.alpha[:, :, 0]
+            input_alpha0 = self.alpha0
+            input_lnPi = self.lnPi
+            self.alpha0 = np.repeat(self.alpha0[:, :, 0], nduplicates, axis=2)
+            self.lnPi = np.repeat(self.lnPi[:, :, 0], nduplicates, axis=2)
+            self.alpha0 = np.concatenate((input_alpha0, self.alpha0), axis=2)
+            self.lnPi = np.concatenate((input_lnPi, self.lnPi), axis=2)
+            # Initialise alpha to the same as alpha0
+            self.alpha = deepcopy(self.alpha0)
+        else:
+            self.alpha0 = np.repeat(self.alpha0[:, :, 0:1], self.Tau, axis=2)
+            self.lnPi = np.repeat(self.lnPi[:, :, 0:1], self.Tau, axis=2)
+            # Initialise alpha to the same as alpha0
+            self.alpha = deepcopy(self.alpha0)
+# Posterior Updates to Hyperparameters -----------------------------------------------------------------------------
     def post_Alpha(self):#Posterior Hyperparams        
         if self.nclasses>2:
             for l in range(1,self.nscores):
@@ -57,17 +162,13 @@ class DynIBCC(ibcc.IBCC):
         # loop through all timesteps individually by iterating through each row of the sparselist of crowd labels
         tau = 0
         while tau < self.Tau:
-            if len(self.samples_per_timestep) > 1:
-                samples_per_timestep = self.samples_per_timestep[tau]
+            if len(self.sample_bins) > 1:
+                samples_per_timestep = self.sample_bins[tau]
             else:
                 samples_per_timestep = self.samples_per_timestep
             k = self.crowdlabels[tau,0]
             i = self.crowdlabels[tau,1]
             c = np.sum(self.crowdlabels[tau:tau + samples_per_timestep, 2] == l, axis=0).astype(float)
-            if len(self.samples_per_timestep) > 1:
-                samples_per_timestep = self.samples_per_timestep[tau]
-            else:
-                samples_per_timestep = self.samples_per_timestep
             tau_pr = tau_prev[k]
             tau_prev[k] = tau
             h = self.E_t[i, :].reshape((self.nclasses, 1))  # column vector
@@ -111,8 +212,8 @@ class DynIBCC(ibcc.IBCC):
         Lambda_cov = np.zeros((self.nclasses, self.nclasses, self.K))
         
         while tau >= 0:
-            if len(self.samples_per_timestep) > 1:
-                samples_per_timestep = self.samples_per_timestep[tau]
+            if len(self.sample_bins) > 1:
+                samples_per_timestep = self.sample_bins[tau]
             else:
                 samples_per_timestep = self.samples_per_timestep
             k = self.crowdlabels[tau,0]
@@ -170,8 +271,8 @@ class DynIBCC(ibcc.IBCC):
         while tau < self.N:
             logging.debug("Alpha update filter: " + str(tau) + ", " + str(self.windows[tau]) + "/" + str(np.max(self.windows)))
             tau_pr = tau - samples_per_timestep
-            if len(self.samples_per_timestep) > 1:
-                samples_per_timestep = self.samples_per_timestep[tau]
+            if len(self.sample_bins) > 1:
+                samples_per_timestep = self.sample_bins[tau]
             else:
                 samples_per_timestep = self.samples_per_timestep
             h_cov = self.h_cov(tau)
@@ -221,8 +322,8 @@ class DynIBCC(ibcc.IBCC):
         Lambda_cov = np.zeros((self.nclasses * self.K, self.nclasses * self.K))
         while tau > 0:
             tau -= samples_per_timestep
-            if len(self.samples_per_timestep) > 1:
-                samples_per_timestep = self.samples_per_timestep[tau - 1]  # need to get the gap from the previous tau
+            if len(self.sample_bins) > 1:
+                samples_per_timestep = self.sample_bins[tau - 1]  # need to get the gap from the previous tau
             else:
                 samples_per_timestep = self.samples_per_timestep
             logging.debug("Alpha update smoother: " + str(tau) + ", " + str(self.windows[tau]) + "/" + str(np.max(self.windows)))
@@ -249,181 +350,38 @@ class DynIBCC(ibcc.IBCC):
             self.alpha[:, l, tauIdx] = alpha_l
             if self.nclasses == 2:
                 self.alpha[:, 1 - l, tauIdx] = alphasum - self.alpha[:, l, tauIdx]
-
+# Expectations: methods for calculating expectations with respect to parameters for the VB algorithm ---------------
     def expec_lnPi(self):
         self.post_Alpha()
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         for s in range(self.nscores):        
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha
-    
-    def lnjoint_table(self):
-        if self.uselowerbound:
+# Likelihoods of observations and current estimates of parameters --------------------------------------------------
+    def lnjoint_table(self, alldata=False):
+        if self.uselowerbound or alldata:
             idxs = np.ones(self.N, dtype=np.bool)
         else:  # no need to calculate in full
             idxs = self.testidxs    
         for j in range(self.nclasses):
-            data = self.lnPi[j, self.validcrowdlabels, self.tauidxs]
-            self.lnPi_table[self.valididxs] = data
+            data = self.lnPi[j, self.test_crowd_labels, self.tauidxs]
+            self.lnPi_table[self.test_crowdlabel_idxs] = data
             self.lnpCT[idxs, j] = np.sum(self.lnPi_table, 1) + self.lnkappa[j]            
-        return self.lnpCT
 
     def lnjoint_sparselist(self):
         if self.conf_mat_ind == []:
             crowdlabels = self.crowdlabels.astype(int)
             logging.info("Using only discrete labels at the moment.")
             self.conf_mat_ind = np.ravel_multi_index((crowdlabels[:, 2], np.arange(self.Tau)), dims=(self.nscores, self.Tau))
-        lnjoint = np.zeros((self.N, self.nclasses))
         for j in range(self.nclasses):
             weights = self.lnPi[j, :].ravel()[self.conf_mat_ind]
-            lnjoint[:, j] = np.bincount(self.crowdlabels[:, 1], weights=weights, minlength=self.N) + self.lnkappa[j]
-        return lnjoint
+            self.lnpCT[:, j] = np.bincount(self.crowdlabels[:, 1], weights=weights, minlength=self.N) + self.lnkappa[j]
 
-    def lowerbound(self, lnjoint):
-        #probability of these targets is 1 as they are training labels
-        #lnjoint[self.trainT!=-1,:] -= np.reshape(self.lnKappa, (1,self.nClasses))
-        lnpCT = self.post_lnjoint_ct(lnjoint)                    
-        
-        # !!! Need to replace? Record the priors at each step. Save alpha0 as alpha0[:,:,0].
-        #alpha0 then refers to the prior at each step.
-        # !!! Does it need reshaping?
-        #alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, 1))
-        lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
-                    + np.sum((self.alpha0-1)*self.lnPi, 1)
-        lnpPi = np.sum(np.sum(lnpPi))
-            
-        lnpKappa = self.post_lnkappa()
-            
-        EEnergy = lnpCT + lnpPi + lnpKappa
-        
-        ET = self.E_t[self.E_t!=0]
-        lnqT = np.sum( ET*np.log(ET) )
-
-        lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
-                    np.sum( (self.alpha-1)*self.lnPi, 1)
-        lnqPi = np.sum(np.sum(lnqPi))        
-            
-        lnqKappa = self.q_lnkappa()
-            
-        H = - lnqT - lnqPi - lnqKappa
-        L = EEnergy + H
-        
-        #print 'EEnergy ' + str(EEnergy) + ', H ' + str(H)
-        return L
-         
-    def desparsify_crowdlabels(self, crowdlabels):
-        if crowdlabels.shape[1] != 3:
-            self.table_format_flag = True
-            # First, record which objects were actually observed.
-            self.observed_idxs = np.argwhere(np.nansum(crowdlabels, axis=1) >= 0).reshape(-1)
-            self.full_N = crowdlabels.shape[0]
-            windows = np.arange(np.ceil(self.full_N / float(self.samples_per_timestep)), dtype=np.int)
-            windows = np.tile(windows, (self.samples_per_timestep, 1)).flatten('F')
-            windows = windows[self.observed_idxs]
-            self.windows = windows
-            bincounts = np.bincount(windows)
-            self.samples_per_timestep = bincounts[windows]
-            if crowdlabels.shape[0] > len(self.observed_idxs):
-                self.sparse = True
-                # cut out the unobserved data points. We'll put them back in at the end of the classification procedure.
-                crowdlabels = crowdlabels[self.observed_idxs, :]
-        else:
-            self.observed_idxs, mappedidxs = np.unique(crowdlabels[:, 1], return_inverse=True)
-            self.full_N = np.max(crowdlabels[:, 1])
-            windows = np.arange(self.full_N / self.samples_per_timestep)
-            windows = np.tile(windows, (self.samples_per_timestep, 1)).flatten('F')
-            windows = windows[self.observed_idxs]
-            self.windows = windows
-            bincounts = np.bincount(windows)
-            self.samples_per_timestep = bincounts[windows]
-            if self.full_N > len(self.observed_idxs):
-                self.sparse = True
-                # map the IDs so we skip unobserved data points. We'll map back at the end of the classification procedure.
-                crowdlabels[:, 1] = mappedidxs
-        return crowdlabels
-
-    def preprocess_data(self, crowdlabels, train_t=None, testidxs=None):
-        '''
-        When crowd labels are supplied in table format, we assume that the responses from members of the crowd were all
-        submitted concurrently in the same order as the objects are listed in the table.
-        '''
-        super(DynIBCC, self).preprocess_data(crowdlabels, train_t, testidxs)
-        # Sort out the confusion matrices. In the dynamic case, there is one for every crowdsourced label!
-#         if self.table_format_flag and np.any(np.bitwise_or(np.isnan(self.crowdlabels), self.crowdlabels < 0)):  # best to work with a sparse list in the dynamic case
-#             self.crowdlabels = self.crowdtable_to_sparselist(self.crowdlabels)
-#             self.table_format_flag = False
-        if self.table_format_flag:
-            self.Tau = self.crowdlabels.shape[0] * self.crowdlabels.shape[1]
-        else:
-            self.Tau = self.crowdlabels.shape[0]
-        # indexes for calculating the joint likelihood efficiently
-        timeidxs = np.tile(np.arange(self.N).reshape((self.N, 1)), (1, self.K))
-        timeidxs = timeidxs[self.valididxs].astype(int)
-        self.tauidxs = np.ravel_multi_index((self.validagentidxs, timeidxs), (self.K, self.N))
-        # Once we have the dataset to classify, we can determine the number of timesteps self.Tau, which we need to
-        # expand lnPi to the correct number of matrices.
-        if self.alpha!=[] and self.alpha.shape[2]<self.Tau:
-            #Case where we have already run this combiner with fewer timesteps
-            oldTau = self.alpha0.shape[2]
-            # Expand the prior
-            ending = self.alpha0[:,:,oldTau-1]
-            ending = np.repeat(ending, self.Tau-oldTau, axis=2)
-            self.alpha0 = np.concatenate((self.alpha0, ending), axis=2)
-            # Do the same for the posterior
-            ending = self.alpha[:,:,oldTau-1]
-            ending = np.repeat(ending, self.Tau-oldTau, axis=2)
-            self.alpha = np.concatenate((self.alpha, ending), axis=2)
-            # And the same for lnpi
-            ending = self.lnPi[:, :, oldTau - 1]
-            ending = np.repeat(ending, self.Tau - oldTau, axis=2)
-            self.lnPi = np.concatenate((self.lnPi, ending), axis=2)
-        elif self.alpha!=[] and self.alpha.shape[2]>self.Tau:
-            #The new dataset has fewer items than before
-            self.alpha0[:,:,0:self.Tau]
-            self.alpha[:, :, 0:self.Tau]
-            self.lnPi[:, :, 0:self.Tau]
-        elif self.alpha0.shape[2] > 1:
-            #Haven't run the combiner yet, so need to expand from the first matrix
-            #Find the number of new alpha0 needed. We can pass in multiple at the start, but if not enough, we'll
-            #duplicate the first alpha0.
-            nduplicates = self.Tau - self.alpha[:, :, 0]
-            input_alpha0 = self.alpha0
-            input_lnPi = self.lnPi
-            self.alpha0 = np.repeat(self.alpha0[:, :, 0], nduplicates, axis=2)
-            self.lnPi = np.repeat(self.lnPi[:, :, 0], nduplicates, axis=2)
-            self.alpha0 = np.concatenate((input_alpha0, self.alpha0), axis=2)
-            self.lnPi = np.concatenate((input_lnPi, self.lnPi), axis=2)
-            # Initialise alpha to the same as alpha0
-            self.alpha = deepcopy(self.alpha0)
-        else:
-            self.alpha0 = np.repeat(self.alpha0[:, :, 0:1], self.Tau, axis=2)
-            self.lnPi = np.repeat(self.lnPi[:, :, 0:1], self.Tau, axis=2)
-            # Initialise alpha to the same as alpha0
-            self.alpha = deepcopy(self.alpha0)
-
-    def init_lnPi(self):       
-        if self.alpha != []:
-            return  # the basic initialisation was done when comine_classifications was called on a previous dataset
-        self.alpha0 = self.alpha0.astype(float)
-        if hasattr(self.alpha0, 'ndim') and self.alpha0.ndim == 3:
-            #we've already done the basic initialisation
-            return
-        # usually we input a 2-D matrix that we'll copy for all timesteps
-        self.alpha0 = np.array(self.alpha0)
-        if len(self.alpha0.shape) < 3:
-            self.alpha0 = self.alpha0[:, :, np.newaxis]
-        sumAlpha = np.sum(self.alpha0, 1)
-        psiSumAlpha = psi(sumAlpha)
-        self.lnPi = psi(self.alpha0) - psiSumAlpha
-
-    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, table_format=False, dh=None, samples_per_timestep=1):
-        super(DynIBCC,self).__init__(nclasses, nscores, alpha0, nu0, K, table_format, dh)
-        self.samples_per_timestep = samples_per_timestep
-    
+# Loader and Runner helper functions -------------------------------------------------------------------------------
 if __name__ == '__main__':
     if len(sys.argv)>1:
         configFile = sys.argv[1]
     else:
         configFile = './config/my_project.py'
-    ibcc.runIbcc(configFile, DynIBCC)
+    ibcc.load_and_run_ibcc(configFile, DynIBCC)
     
