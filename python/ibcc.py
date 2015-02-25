@@ -8,7 +8,7 @@ from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
 from ibccdata import DataHandler
 from scipy.stats import expon
-from scipy.optimize import fmin_bfgs
+from scipy.optimize import fmin_bfgs, fmin
 
 class IBCC(object):
 # Configuration for variational Bayes (VB) algorithm for approximate inference -------------------------------------
@@ -424,6 +424,9 @@ class IBCC(object):
         to contain the optimal values, searched for using BFGS.
         '''
         def map_target_function(hyperparams, combiner, alphamean, numean):
+            logging.debug("Hyperparms: %s" % str(hyperparams))
+            if np.any(np.isnan(hyperparams)) or np.any(hyperparams <= 0):
+                return np.inf
             combiner.nu0 = hyperparams[-combiner.nclasses:]
             initialK = (len(hyperparams) - combiner.nclasses) / (combiner.nclasses * combiner.nscores)
             alpha0_flat = hyperparams[0:combiner.nclasses * combiner.nscores * initialK]
@@ -437,7 +440,7 @@ class IBCC(object):
         # set up combiner object
         self.preprocess_data(crowdlabels, train_t, testidxs)
         hyperparams0 = np.concatenate((alphamean.flatten(), numean.flatten()))
-        opt_hyperparams = fmin_bfgs(map_target_function, hyperparams0, args=(self, alphamean, numean), maxiter=maxiter)
+        opt_hyperparams = fmin(map_target_function, hyperparams0, args=(self, alphamean, numean), maxiter=maxiter)
         logging.debug("Optimal hyperparams: %s" % str(opt_hyperparams))
         map_target_function(opt_hyperparams, self, alphamean, numean)
 

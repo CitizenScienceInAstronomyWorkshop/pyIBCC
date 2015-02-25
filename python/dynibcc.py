@@ -361,12 +361,16 @@ class DynIBCC(ibcc.IBCC):
     def lnjoint_table(self, alldata=False):
         if self.uselowerbound or alldata:
             idxs = np.ones(self.N, dtype=np.bool)
+            for j in range(self.nclasses):
+                data = self.lnPi[j, self.test_crowd_labels, self.tauidxs]
+                self.lnPi_table_all[self.test_crowdlabel_idxs] = data
+                self.lnpCT[idxs, j] = np.sum(self.lnPi_table_all, 1) + self.lnkappa[j]
         else:  # no need to calculate in full
             idxs = self.testidxs    
-        for j in range(self.nclasses):
-            data = self.lnPi[j, self.test_crowd_labels, self.tauidxs]
-            self.lnPi_table[self.test_crowdlabel_idxs] = data
-            self.lnpCT[idxs, j] = np.sum(self.lnPi_table, 1) + self.lnkappa[j]            
+            for j in range(self.nclasses):
+                data = self.lnPi[j, self.test_crowd_labels, self.tauidxs]
+                self.lnPi_table_test[self.test_crowdlabel_idxs] = data
+                self.lnpCT[idxs, j] = np.sum(self.lnPi_table_test, 1) + self.lnkappa[j]
 
     def lnjoint_sparselist(self):
         if self.conf_mat_ind == []:
