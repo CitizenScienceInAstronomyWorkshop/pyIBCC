@@ -11,6 +11,8 @@ from scipy.stats import expon
 from scipy.optimize import fmin_bfgs, fmin
 
 class IBCC(object):
+# Print extra debug info?
+    verbose = True
 # Configuration for variational Bayes (VB) algorithm for approximate inference -------------------------------------
     # determine convergence by calculating lower bound? Quicker to set=False so we check convergence of target variables
     uselowerbound = True
@@ -29,6 +31,7 @@ class IBCC(object):
     K = None
     N = 0 #number of objects
     # Sparsity handling
+    sparse = False
     observed_idxs = []
     full_train_t = []
     full_N = 0
@@ -69,10 +72,11 @@ class IBCC(object):
 
     def init_params(self):
         logging.debug('Initialising parameters...')
-        logging.debug('Alpha0: ' + str(self.alpha0))
+        if self.verbose:
+            logging.debug('Alpha0: ' + str(self.alpha0))
         self.init_lnPi()
-
-        logging.debug('Nu0: ' + str(self.nu0))
+        if self.verbose:
+            logging.debug('Nu0: ' + str(self.nu0))
         self.init_lnkappa()
 
     def init_lnkappa(self):
@@ -159,7 +163,7 @@ class IBCC(object):
         if crowdlabels.shape[1]!=3:
             self.table_format_flag = True
             # First, record which objects were actually observed.
-            self.observed_idxs = np.argwhere(np.nansum(crowdlabels, axis=1) >= 0).reshape(-1)
+            self.observed_idxs = np.argwhere(np.sum(np.isfinite(crowdlabels), axis=1) > 0).reshape(-1)
             if crowdlabels.shape[0] > len(self.observed_idxs):
                 self.sparse = True
                 self.full_N = crowdlabels.shape[0]
@@ -217,19 +221,31 @@ class IBCC(object):
             self.K = newK
             self.init_params() 
         C = {}
-        if self.table_format_flag:            
+        if self.table_format_flag:
+#             if self.nscores > 2:
             for l in range(self.nscores):
                 Cl = np.zeros(crowdlabels.shape)
                 Cl[crowdlabels == l] = 1
                 C[l] = Cl
-        else:            
+#             else:
+#                 C[1] = np.nan_to_num(crowdlabels)
+#                 C[0] = 1 - C[1]
+#         elif self.nscores > 2:
+        else:
             for l in range(self.nscores):
                 lIdxs = np.where(crowdlabels[:, 2] == l)[0]
-                data = np.array(np.ones((len(lIdxs),1))).reshape(-1)
+                data = np.ones((len(lIdxs), 1)).reshape(-1)
                 rows = np.array(crowdlabels[lIdxs, 1]).reshape(-1)
                 cols = np.array(crowdlabels[lIdxs, 0]).reshape(-1)
                 Cl = coo_matrix((data,(rows,cols)), shape=(self.N, self.K))
                 C[l] = Cl
+#         else:
+#             for l in range(self.nscores):
+#                 data = np.array(crowdlabels[:, 2]).reshape(-1)
+#                 rows = np.array(crowdlabels[:, 1]).reshape(-1)
+#                 cols = np.array(crowdlabels[:, 0]).reshape(-1)
+#                 Cl = coo_matrix((data, (rows, cols)), shape=(self.N, self.K))
+#                 C[l] = Cl
         # Set and reset object properties for the new dataset
         self.C = C
         self.crowdlabels = crowdlabels
@@ -267,7 +283,8 @@ class IBCC(object):
             #check convergence        
             if self.uselowerbound:
                 L = self.lowerbound()
-                logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L-oldL))
+                if self.verbose:
+                    logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L - oldL))
                 change = L-oldL                
                 oldL = L
             else:
@@ -275,9 +292,9 @@ class IBCC(object):
             if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>self.min_iterations:
                 converged = True
             self.nIts+=1
-            if change<0:
+            if change < 0 and self.verbose:
                 logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
-            else:
+            elif self.verbose:
                 logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
         logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
         # Convert back to original idxs in case of unobserved IDs
@@ -326,7 +343,7 @@ class IBCC(object):
 # Likelihoods of observations and current estimates of parameters --------------------------------------------------
     def lnjoint(self, alldata=False):
         # Checking type. Subclasses that need other types can override this log joint implementation
-        if self.crowdlabels.dtype != np.int:
+        if self.crowdlabels.dtype != np.int and self.nscores > 2:
             logging.warning("Converting input data matrix to integers.")
             self.crowdlabels = self.crowdlabels.astype(int)
         if self.table_format_flag:
@@ -342,12 +359,18 @@ class IBCC(object):
         if self.uselowerbound or alldata:
             idxs = np.ones(self.N, dtype=np.bool)
             for j in range(self.nclasses):
+#                 if self.nscores == 2:
+#                     data = (self.lnPi[j, 1, self.all_agent_idxs] * self.all_crowd_labels) + (self.lnPi[j, 0, self.all_agent_idxs] * (1 - self.all_crowd_labels))
+#                 else:
                 data = self.lnPi[j, self.all_crowd_labels, self.all_agent_idxs]
                 self.lnPi_table_all[self.all_crowdlabel_idxs] = data
                 self.lnpCT[idxs, j] = np.sum(self.lnPi_table_all, 1) + self.lnkappa[j]
         else:  # no need to calculate in full
             idxs = self.testidxs
             for j in range(self.nclasses):
+#                 if self.nscores == 2:
+#                     data = (self.lnPi[j, 1, self.test_agent_idxs] * self.test_crowd_labels) + (self.lnPi[j, 0, self.test_agent_idxs] * (1 - self.test_crowd_labels))
+#                 else:
                 data = self.lnPi[j, self.test_crowd_labels, self.test_agent_idxs]
                 self.lnPi_table_test[self.test_crowdlabel_idxs] = data
                 self.lnpCT[idxs, j] = np.sum(self.lnPi_table_test, 1) + self.lnkappa[j]
