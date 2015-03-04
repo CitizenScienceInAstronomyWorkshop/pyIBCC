@@ -92,9 +92,8 @@ class DynIBCC(ibcc.IBCC):
         else:
             self.Tau = self.crowdlabels.shape[0]
         # indexes for calculating the joint likelihood efficiently
-        timeidxs = np.tile(np.arange(self.N).reshape((self.N, 1)), (1, self.K))
-        timeidxs = timeidxs[self.test_crowdlabel_idxs].astype(int)
-        self.tauidxs = np.ravel_multi_index((self.test_agent_idxs, timeidxs), (self.K, self.N))
+        self.tauidxs = np.tile(np.arange(self.N, dtype=np.int).reshape((self.N, 1)), (1, self.K))
+        self.tauidxs_test = self.tauidxs[self.testidxs, :]
         # Once we have the dataset to classify, we can determine the number of timesteps self.Tau, which we need to
         # expand lnPi to the correct number of matrices.
         if self.alpha != [] and self.alpha.shape[2] < self.Tau:
@@ -362,14 +361,18 @@ class DynIBCC(ibcc.IBCC):
         if self.uselowerbound or alldata:
             idxs = np.ones(self.N, dtype=np.bool)
             for j in range(self.nclasses):
-                data = self.lnPi[j, self.test_crowd_labels, self.tauidxs]
-                self.lnPi_table_all[self.test_crowdlabel_idxs] = data
+                data = np.zeros((self.N, self.K))
+                for l in range(self.nscores):
+                    data += self.lnPi[j, l, self.tauidxs] * self.C[l]
+                self.lnPi_table_all = data
                 self.lnpCT[idxs, j] = np.sum(self.lnPi_table_all, 1) + self.lnkappa[j]
         else:  # no need to calculate in full
-            idxs = self.testidxs    
+            idxs = self.testidxs
             for j in range(self.nclasses):
-                data = self.lnPi[j, self.test_crowd_labels, self.tauidxs]
-                self.lnPi_table_test[self.test_crowdlabel_idxs] = data
+                data = np.zeros((self.Ntest, self.K))
+                for l in range(self.nscores):
+                    data += self.lnPi[j, l, self.tauidxs_test] * self.Ctest[l]
+                self.lnPi_table_test = data
                 self.lnpCT[idxs, j] = np.sum(self.lnPi_table_test, 1) + self.lnkappa[j]
 
     def lnjoint_sparselist(self):

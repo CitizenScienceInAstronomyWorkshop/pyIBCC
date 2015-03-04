@@ -22,6 +22,9 @@ class IBCC(object):
     keeprunning = True  # Set to false to cause the combine_classifications method to exit without completing; useful
     # if another thread is checking whether IBCC is taking too long.
 # Dataset attributes -----------------------------------------------------------------------------------------------
+    discretedecisions = False  # force decisions to be discrete integers. If this is false, you can submit undecided
+    # responses as fractions between two classes. E.g. 2.3 means that 0.3 of the decision will go to class 3, and 0.7
+    # will go to class 2. Only neighbouring classes can have uncertain decisions in this way.
     table_format_flag = False  # crowdlabels as a full KxN table? If false, use a sparse 3-column list, where 1st
     # column=classifier ID, 2nd column = obj ID, 3rd column = score.
     nclasses = None
@@ -30,6 +33,8 @@ class IBCC(object):
     nu0 = None
     K = None
     N = 0 #number of objects
+    Ntrain = 0  # no. training objects
+    Ntest = 0  # no. test objects
     # Sparsity handling
     sparse = False
     observed_idxs = []
@@ -139,11 +144,11 @@ class IBCC(object):
             # values a fraction above class j
             partly_j_idxs = np.bitwise_and(self.train_t[uncert_trainidxs] > j, self.train_t[uncert_trainidxs] < j + 1)
             partly_j_idxs = uncert_trainidxs[partly_j_idxs]
-            self.E_t[partly_j_idxs, j] = 1 - self.train_t[partly_j_idxs] + j
+            self.E_t[partly_j_idxs, j] = (j + 1) - self.train_t[partly_j_idxs]
             # values a fraction below class j
             partly_j_idxs = np.bitwise_and(self.train_t[uncert_trainidxs] < j, self.train_t[uncert_trainidxs] > j - 1)
             partly_j_idxs = uncert_trainidxs[partly_j_idxs]
-            self.E_t[partly_j_idxs, j] = self.train_t[partly_j_idxs] - (j - 1)
+            self.E_t[partly_j_idxs, j] = self.train_t[partly_j_idxs] - j + 1
         if self.sparse:
             self.E_t_sparse = self.E_t  # current working version is sparse
 
@@ -207,6 +212,7 @@ class IBCC(object):
             self.train_t = train_t
         # record the test and train idxs
         self.trainidxs = self.train_t > -1
+        self.Ntrain = np.sum(self.trainidxs)
         if testidxs != None:
             self.testidxs = testidxs[self.observed_idxs]
         else:
@@ -222,48 +228,46 @@ class IBCC(object):
             self.init_params() 
         C = {}
         if self.table_format_flag:
-#             if self.nscores > 2:
             for l in range(self.nscores):
                 Cl = np.zeros(crowdlabels.shape)
                 Cl[crowdlabels == l] = 1
+                if not self.discretedecisions:
+                    partly_l_idxs = np.bitwise_and(crowdlabels > l, crowdlabels < l + 1)  # partly above l
+                    Cl[partly_l_idxs] = (l + 1) - crowdlabels[partly_l_idxs]
+                    partly_l_idxs = np.bitwise_and(crowdlabels < l, crowdlabels > l - 1)  # partly below l
+                    Cl[partly_l_idxs] = crowdlabels[partly_l_idxs] - l + 1
                 C[l] = Cl
-#             else:
-#                 C[1] = np.nan_to_num(crowdlabels)
-#                 C[0] = 1 - C[1]
-#         elif self.nscores > 2:
         else:
             for l in range(self.nscores):
                 lIdxs = np.where(crowdlabels[:, 2] == l)[0]
                 data = np.ones((len(lIdxs), 1)).reshape(-1)
                 rows = np.array(crowdlabels[lIdxs, 1]).reshape(-1)
                 cols = np.array(crowdlabels[lIdxs, 0]).reshape(-1)
+                if not self.discretedecisions:
+                    partly_l_idxs = np.bitwise_and(crowdlabels[:, 2] > l, crowdlabels[:, 2] < l + 1)  # partly above l
+                    data = np.concatenate((data, (l + 1) - crowdlabels[partly_l_idxs, 2]))
+                    rows = np.concatenate((rows, crowdlabels[partly_l_idxs, 1].reshape(-1)))
+                    cols = np.concatenate((cols, crowdlabels[partly_l_idxs, 0].reshape(-1)))
+                    partly_l_idxs = np.bitwise_and(crowdlabels[:, 2] < l, crowdlabels[:, 2] > l - 1)  # partly below l
+                    data = np.concatenate((data, crowdlabels[partly_l_idxs, 2] - l + 1))
+                    rows = np.concatenate((rows, crowdlabels[partly_l_idxs, 1].reshape(-1)))
+                    cols = np.concatenate((cols, crowdlabels[partly_l_idxs, 0].reshape(-1)))
                 Cl = coo_matrix((data,(rows,cols)), shape=(self.N, self.K))
                 C[l] = Cl
-#         else:
-#             for l in range(self.nscores):
-#                 data = np.array(crowdlabels[:, 2]).reshape(-1)
-#                 rows = np.array(crowdlabels[:, 1]).reshape(-1)
-#                 cols = np.array(crowdlabels[:, 0]).reshape(-1)
-#                 Cl = coo_matrix((data, (rows, cols)), shape=(self.N, self.K))
-#                 C[l] = Cl
         # Set and reset object properties for the new dataset
         self.C = C
         self.crowdlabels = crowdlabels
         self.lnpCT = np.zeros((self.N, self.nclasses))
         self.conf_mat_ind = []
-        if self.table_format_flag:
-            agentIdx = np.tile(np.arange(self.K), (self.N, 1))
-            self.lnPi_table_all = np.zeros((self.N, self.K))
-            self.lnPi_table_test = np.zeros((np.sum(self.testidxs), self.K))
-            #pre-compute the indices into the pi arrays
-            self.all_crowdlabel_idxs = np.bitwise_and(np.isfinite(crowdlabels), crowdlabels >= 0)
-            self.all_crowd_labels = crowdlabels[self.all_crowdlabel_idxs].astype(int)
-            self.all_agent_idxs = agentIdx[self.all_crowdlabel_idxs].astype(int)
-            #repeat for test labels only
-            crowdlabels = crowdlabels[self.testidxs, :]
-            self.test_crowdlabel_idxs = np.bitwise_and(np.isfinite(crowdlabels), crowdlabels >= 0)
-            self.test_crowd_labels = crowdlabels[self.test_crowdlabel_idxs].astype(int)
-            self.test_agent_idxs = agentIdx[self.test_crowdlabel_idxs].astype(int)
+        self.Ntest = np.sum(self.testidxs)
+        # pre-compute the indices into the pi arrays
+        # repeat for test labels only
+        self.Ctest = {}
+        for l in range(self.nscores):
+            self.Ctest[l] = C[l][self.testidxs, :]
+        # Reset the pre-calculated data for the training set in case train_t has changed
+        self.alpha_tr = []
+
 # Run the inference algorithm --------------------------------------------------------------------------------------
     def combine_classifications(self, crowdlabels, train_t=None, testidxs=None, preprocess=True):
         if preprocess:
@@ -307,11 +311,20 @@ class IBCC(object):
         return self.E_t
 # Posterior Updates to Hyperparameters -----------------------------------------------------------------------------
     def post_Alpha(self):  # Posterior Hyperparams
+        # Save the counts from the training data so we only recalculate the test data on every iteration
+        if self.alpha_tr == []:
+            self.alpha_tr = self.alpha0.copy()
+            for j in range(self.nclasses):
+                for l in range(self.nscores):
+                    Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
+                    counts = self.C[l][self.trainidxs,:].T.dot(Tj).reshape(-1)
+                    self.alpha_tr[j,l,:] += counts
+        # Add the counts from the test data
         for j in range(self.nclasses):
             for l in range(self.nscores):
-                Tj = self.E_t[:, j].reshape((self.N, 1))
-                counts = self.C[l].T.dot(Tj).reshape(-1)
-                self.alpha[j, l, :] = self.alpha0[j, l, :] + counts
+                Tj = self.E_t[self.testidxs, j].reshape((self.Ntest, 1))
+                counts = self.Ctest[l].T.dot(Tj).reshape(-1)
+                self.alpha[j, l, :] = self.alpha_tr[j, l, :] + counts
 # Expectations: methods for calculating expectations with respect to parameters for the VB algorithm ---------------
     def expec_lnkappa(self):
         sumET = np.sum(self.E_t, 0)
@@ -342,10 +355,6 @@ class IBCC(object):
             self.E_t[self.testidxs, :] = pT
 # Likelihoods of observations and current estimates of parameters --------------------------------------------------
     def lnjoint(self, alldata=False):
-        # Checking type. Subclasses that need other types can override this log joint implementation
-        if self.crowdlabels.dtype != np.int and self.nscores > 2:
-            logging.warning("Converting input data matrix to integers.")
-            self.crowdlabels = self.crowdlabels.astype(int)
         if self.table_format_flag:
             self.lnjoint_table(alldata)
         else:
@@ -359,20 +368,18 @@ class IBCC(object):
         if self.uselowerbound or alldata:
             idxs = np.ones(self.N, dtype=np.bool)
             for j in range(self.nclasses):
-#                 if self.nscores == 2:
-#                     data = (self.lnPi[j, 1, self.all_agent_idxs] * self.all_crowd_labels) + (self.lnPi[j, 0, self.all_agent_idxs] * (1 - self.all_crowd_labels))
-#                 else:
-                data = self.lnPi[j, self.all_crowd_labels, self.all_agent_idxs]
-                self.lnPi_table_all[self.all_crowdlabel_idxs] = data
+                data = np.zeros((self.N, self.K))
+                for l in range(self.nscores):
+                    data += self.lnPi[j, l, :] * self.C[l]
+                self.lnPi_table_all = data
                 self.lnpCT[idxs, j] = np.sum(self.lnPi_table_all, 1) + self.lnkappa[j]
         else:  # no need to calculate in full
             idxs = self.testidxs
             for j in range(self.nclasses):
-#                 if self.nscores == 2:
-#                     data = (self.lnPi[j, 1, self.test_agent_idxs] * self.test_crowd_labels) + (self.lnPi[j, 0, self.test_agent_idxs] * (1 - self.test_crowd_labels))
-#                 else:
-                data = self.lnPi[j, self.test_crowd_labels, self.test_agent_idxs]
-                self.lnPi_table_test[self.test_crowdlabel_idxs] = data
+                data = np.zeros((self.Ntest, self.K))
+                for l in range(self.nscores):
+                    data += self.lnPi[j, l, :] * self.Ctest[l]
+                self.lnPi_table_test = data
                 self.lnpCT[idxs, j] = np.sum(self.lnPi_table_test, 1) + self.lnkappa[j]
         
     def lnjoint_sparselist(self):
