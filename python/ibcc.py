@@ -1,151 +1,167 @@
 '''
 @author: Edwin Simpson
 '''
-import sys, pickle, logging
+import sys, logging
 import numpy as np
 from copy import deepcopy
 from scipy.sparse import coo_matrix
 from scipy.special import psi, gammaln
+from ibccdata import DataHandler
+from scipy.optimize import fmin
+from scipy.stats import gamma
 
-class Ibcc(object):
+class IBCC(object):
     
-    useLowerBound = True #may be quicker not to calculate this
+    uselowerbound = True #may be quicker not to calculate this
     
-    minNoIts = 1
-    maxNoIts = 500
-    convThreshold = 0.0001
+    min_iterations = 1
+    max_iterations = 500
+    conv_threshold = 0.0001
     
-    crowdTable = False #crowd labels as a full KxnObjs table? Otherwise, use 
+    table_format_flag = False #crowd labels as a full KxnObjs table? 
+    #Otherwise, use 
     # a sparse 3-column list, where 1st column=classifier ID, 2nd column = 
     # obj ID, 3rd column = score.
+    crowdlabels = None
     
-    nClasses = None
-    nScores = None
+    nclasses = None
+    nscores = None
     alpha0 = None
     nu0 = None
     K = None
+    N = 0 #number of objects
     
     #The model
-    lnKappa = []
+    lnkappa = []
     nu = []
     lnPi = []
     alpha = []
-    ET = []
+    E_t = []
     
-    obsIdxs = []
+    observed_idxs = []
     
-    keeprunning = True # set to false causes the combineClassifications method to exit without completing
+    keeprunning = True # set to false causes the combine_classifications method to exit without completing
+    
+    #hyperprior parameters
+    gam_scale_alpha = None  #Gamma distribution params 
+    gam_shape_alpha = 5 #Gamma distribution params --> confidence in seed values
+    
+    gam_scale_nu = None
+    gam_shape_nu = 5
+    
+    noptiter = 0
 
-    def expecLnKappa(self):#Posterior Hyperparams
-        sumET = np.sum(self.ET[self.obsIdxs,:], 0)
-        for j in range(self.nClasses):
+    def expec_lnkappa(self):#Posterior Hyperparams
+        sumET = np.sum(self.E_t[self.observed_idxs,:], 0)
+        for j in range(self.nclasses):
             self.nu[j] = self.nu0[j] + sumET[j]
-        self.lnKappa = psi(self.nu) - psi(np.sum(self.nu))
+        self.lnkappa = psi(self.nu) - psi(np.sum(self.nu))
        
-    def postAlpha(self):#Posterior Hyperparams -- move back to static IBCC
-        for j in range(self.nClasses):
-            for l in range(self.nScores):
-                Tj = self.ET[:,j].reshape((self.nObjs,1))
+    def post_Alpha(self):#Posterior Hyperparams -- move back to static IBCC
+        for j in range(self.nclasses):
+            for l in range(self.nscores):
+                Tj = self.E_t[:,j].reshape((self.N,1))
                 counts = self.C[l].T.dot(Tj).reshape(-1)
                 self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
        
-    def expecLnPi(self):#Posterior Hyperparams
-        self.postAlpha()
+    def expec_lnPi(self):#Posterior Hyperparams
+        self.post_Alpha()
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
-        for s in range(self.nScores):        
+        for s in range(self.nscores):        
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha
         
     def lnjoint_table(self):
-        lnjoint = np.zeros((self.nObjs, self.nClasses))
-        agentIdx = np.tile(np.transpose(range(self.K)), (self.nObjs,1)) 
+        lnjoint = np.zeros((self.N, self.nclasses))
+        agentIdx = np.tile(np.transpose(range(self.K)), (self.N,1)) 
     
-        for j in range(self.nClasses):
-            lnjoint[:,j] = np.sum(self.lnPi[j,self.crowdTable,agentIdx],1) + self.lnKappa[j]
+        for j in range(self.nclasses):
+            lnjoint[:,j] = np.sum(self.lnPi[j,self.table_format_flag,agentIdx],1) + self.lnkappa[j]
         return lnjoint
         
-    def lnjoint_sparseList(self):
-        lnjoint = np.zeros((self.nObjs, self.nClasses))
-        for j in range(self.nClasses):
-            data = self.lnPi[j,self.crowdLabels[:,2],self.crowdLabels[:,0]].reshape(-1)
-            rows = self.crowdLabels[:,1].reshape(-1)
-            cols = np.zeros(self.crowdLabels.shape[0])
+    def lnjoint_sparselist(self):
+        lnjoint = np.zeros((self.N, self.nclasses))
+        for j in range(self.nclasses):
+            data = self.lnPi[j,self.crowdlabels[:,2],self.crowdlabels[:,0]].reshape(-1)
+            rows = self.crowdlabels[:,1].reshape(-1)
+            cols = np.zeros(self.crowdlabels.shape[0])
             
-            likelihood_j = coo_matrix((data, (rows,cols)), shape=(self.nObjs,1)).todense()
-            lnjoint[:,j] = likelihood_j.reshape(-1) + self.lnKappa[j]      
+            likelihood_j = coo_matrix((data, (rows,cols)), shape=(self.N,1)).todense()
+            lnjoint[:,j] = likelihood_j.reshape(-1) + self.lnkappa[j]      
         return lnjoint
         
     def lnjoint(self):
-        if self.crowdTable != None:
+        if self.table_format_flag != None:
             return self.lnjoint_table()
         else:
-            return self.lnjoint_sparseList()
+            return self.lnjoint_sparselist()
 
-    def expecT(self):
+    def expec_t(self):
         
-        self.ET = np.zeros((self.nObjs, self.nClasses))
-        pT = joint = np.zeros((self.nObjs, self.nClasses))
+        self.E_t = np.zeros((self.N, self.nclasses))
+        pT = joint = np.zeros((self.N, self.nclasses))
         lnjoint = self.lnjoint()
             
         #ensure that the values are not too small
         largest = np.max(lnjoint, 1)
-        for j in range(self.nClasses):
+        for j in range(self.nclasses):
             joint[:,j] = lnjoint[:,j] - largest
             
         joint = np.exp(joint)
         norma = np.sum(joint, axis=1)
-        for j in range(self.nClasses):
+        for j in range(self.nclasses):
             pT[:,j] = joint[:,j]/norma
-            self.ET[:,j] = pT[:,j]
+            self.E_t[:,j] = pT[:,j]
             
-        for j in range(self.nClasses):            
+        for j in range(self.nclasses):            
             #training labels
-            row = np.zeros((1,self.nClasses))
+            row = np.zeros((1,self.nclasses))
             row[0,j] = 1
-            self.ET[self.trainT==j,:] = row    
+            self.E_t[self.train_t==j,:] = row    
             
         return lnjoint
       
-    def postLnJoint(self, lnjoint):
-        lnpCT = np.sum(np.sum( lnjoint*self.ET ))                        
+    def post_lnjoint_ct(self, lnjoint):
+        lnpCT = np.sum(np.sum( lnjoint*self.E_t ))                        
         return lnpCT      
             
-    def postLnKappa(self):
+    #Is this right?!!! Should be prior not post?
+    def post_lnkappa(self):
         lnpKappa = gammaln(np.sum(self.nu0))-np.sum(gammaln(self.nu0)) \
-                    + sum((self.nu0-1)*self.lnKappa)
+                    + sum((self.nu0-1)*self.lnkappa)
         return lnpKappa
         
-    def qLnKappa(self):
+    def q_lnkappa(self):
         lnqKappa = gammaln(np.sum(self.nu))-np.sum(gammaln(self.nu)) \
-                        + np.sum((self.nu-1)*self.lnKappa)
+                        + np.sum((self.nu-1)*self.lnkappa)
         return lnqKappa
     
-    def qLnT(self):
-        ET = self.ET[self.ET!=0]
+    def q_ln_t(self):
+        ET = self.E_t[self.E_t!=0]
         return np.sum( ET*np.log(ET) )
         
-    def lowerBound(self, lnjoint):
+    def lowerbound(self, lnjoint):
                         
         #probability of these targets is 1 as they are training labels
-        #lnjoint[self.trainT!=-1,:] -= np.reshape(self.lnKappa, (1,self.nClasses))
-        lnpCT = self.postLnJoint(lnjoint)                    
+        #lnjoint[self.train_t!=-1,:] -= np.reshape(self.lnkappa, (1,self.nclasses))
+        lnpCT = self.post_lnjoint_ct(lnjoint)                    
                         
-        #alpha0 = np.reshape(self.alpha0, (self.nClasses, self.nScores, self.K))
+        #alpha0 = np.reshape(self.alpha0, (self.nclasses, self.nscores, self.K))
         lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
                     + np.sum((self.alpha0-1)*self.lnPi, 1)
         lnpPi = np.sum(np.sum(lnpPi))
             
-        lnpKappa = self.postLnKappa()
+        lnpKappa = self.post_lnkappa()
             
         EEnergy = lnpCT + lnpPi + lnpKappa
         
-        lnqT = self.qLnT()
+        lnqT = self.q_ln_t()
 
         lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
                     np.sum( (self.alpha-1)*self.lnPi, 1)
         lnqPi = np.sum(np.sum(lnqPi))        
             
-        lnqKappa = self.qLnKappa()
+        lnqKappa = self.q_lnkappa()
             
         H = - lnqT - lnqPi - lnqKappa
         L = EEnergy + H
@@ -153,65 +169,63 @@ class Ibcc(object):
         #logging.debug('EEnergy ' + str(EEnergy) + ', H ' + str(H))
         return L
         
-    def preprocessTraining(self, crowdLabels, trainT=None):
-        if trainT==None:
-            if (crowdLabels.shape[1]!=3 or self.crowdTable != None):
-                trainT = np.zeros(crowdLabels.shape[0]) -1
+    def preprocess_training(self, crowdlabels, train_t=None):
+        
+        # Is this necessary? Prevents uncertain labels from crowd!
+        crowdlabels = crowdlabels.astype(int) 
+        self.crowdlabels = crowdlabels
+        if crowdlabels.shape[1]!=3:
+            self.table_format_flag = True
+        
+        if train_t==None:
+            if self.table_format_flag:
+                train_t = np.zeros(self.crowdlabels.shape[0]) -1
             else:
-                trainT = np.zeros(np.max(crowdLabels[:,1])) -1
+                train_t = np.zeros( len(np.unique(self.crowdlabels[:,1])) ) -1
         
-        self.trainT = trainT
-        self.nObjs = trainT.shape[0]        
+        self.train_t = train_t
+        self.N = train_t.shape[0]        
         
-    def preprocessCrowdLabels(self, crowdLabels):
+    def preprocess_crowdlabels(self):
         #ensure we don't have a matrix by mistake
-        if not isinstance(crowdLabels, np.ndarray):
-            crowdLabels = np.array(crowdLabels)
+        if not isinstance(self.crowdlabels, np.ndarray):
+            self.crowdlabels = np.array(self.crowdlabels)
         C = {}
-        if crowdLabels.shape[1]!=3 or self.crowdTable != None:            
-            for l in range(self.nScores):
-                Cl = np.zeros(crowdLabels.shape)
-                Cl[crowdLabels==l] = 1
+        if self.table_format_flag:            
+            for l in range(self.nscores):
+                Cl = np.zeros(self.crowdlabels.shape)
+                Cl[self.crowdlabels==l] = 1
                 C[l] = Cl
-            self.crowdTable = crowdLabels
-            self.obsIdxs = np.argwhere(np.sum(crowdLabels,axis=1)>=0)             
+            self.observed_idxs = np.argwhere(np.sum(self.crowdlabels,axis=1)>=0)             
         else:            
-            for l in range(self.nScores):
-                lIdxs = np.where(crowdLabels[:,2]==l)[0]     
+            for l in range(self.nscores):
+                lIdxs = np.where(self.crowdlabels[:,2]==l)[0]     
                 data = np.array(np.ones((len(lIdxs),1))).reshape(-1)
-                rows = np.array(crowdLabels[lIdxs,1]).reshape(-1)
-                cols = np.array(crowdLabels[lIdxs,0]).reshape(-1)     
-                Cl = coo_matrix((data,(rows,cols)), shape=(self.nObjs, self.K))
+                rows = np.array(self.crowdlabels[lIdxs,1]).reshape(-1)
+                cols = np.array(self.crowdlabels[lIdxs,0]).reshape(-1)     
+                Cl = coo_matrix((data,(rows,cols)), shape=(self.N, self.K))
                 C[l] = Cl
-            self.crowdLabels = crowdLabels
-            self.obsIdxs = np.unique(crowdLabels[:1])
+            self.observed_idxs = np.unique(self.crowdlabels[:,1])
         self.C = C
         
-    def initK(self, crowdLabels):
-        if self.crowdTable != None:
-            newK = self.crowdTable.shape[1]
+    def init_K(self):
+        if self.table_format_flag :
+            newK = self.crowdlabels.shape[1]
         else:
-            newK = np.max(crowdLabels[:,0])
+            newK = np.max(self.crowdlabels[:,0])
         if self.K<=newK:
             self.K = newK+1 #+1 since we start from 0
-            self.initParams() 
+            self.init_params() 
     
-    def combineClassifications(self, crowdLabels, trainT=None):
-        
-        self.preprocessTraining(crowdLabels, trainT)
-        self.initT()
-        
+    def vb_inference(self):
+              
         logging.info('IBCC Combining...')
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
-        
-        crowdLabels = crowdLabels.astype(int)
-        self.initK(crowdLabels)
-        self.preprocessCrowdLabels(crowdLabels)
-        
+
         while not converged and self.keeprunning:
-            oldET = self.ET
+            oldET = self.E_t
             #play around with the order you start these in:
             #Either update the params using the priors+training labels for t
             #Or update the targets using the priors for the params
@@ -220,58 +234,65 @@ class Ibcc(object):
             #and training data is often insufficient -> could lead to biased result 
 
             #update targets
-            lnjoint = self.expecT() 
+            lnjoint = self.expec_t() 
 
             #update params
-            self.expecLnKappa()
-            self.expecLnPi()
+            self.expec_lnkappa()
+            self.expec_lnPi()
         
             #check convergence        
-            if self.useLowerBound:
-                L = self.lowerBound(lnjoint)
+            if self.uselowerbound:
+                L = self.lowerbound(lnjoint)
                 logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L-oldL))
                 change = L-oldL                
                 oldL = L
             else:
-                change = np.sum(np.sum(np.absolute(oldET - self.ET)))            
-            if (self.nIts>=self.maxNoIts or change<self.convThreshold) and self.nIts>self.minNoIts:
-                converged = True
+                change = np.sum(np.sum(np.absolute(oldET - self.E_t)))            
             self.nIts+=1
-            if change<0:
-                logging.warning('Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
+            if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>=self.min_iterations:
+                converged = True
+            if change<-0.00001: #use this small value so we don't worry about likely rounding errors
+                logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
             else:
-                logging.debug('Ibcc iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
-               
-            import gc
-            gc.collect()               
+                logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
                 
-        logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.maxNoIts) + ').')
-        return self.ET
+        logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
+        return self.E_t
         
-    def initParams(self):
+    def init_params(self):
         logging.debug('Initialising parameters...') 
         logging.debug('Alpha0: ' + str(self.alpha0))
-        self.initLnPi()
+        self.init_lnPi()
         
         logging.debug('Nu0: ' + str(self.nu0))
-        self.initLnKappa()
+        self.init_lnkappa()
         
-    def initLnKappa(self):
+    def init_lnkappa(self):
         if self.nu!=[]:
             return
         self.nu = deepcopy(np.float64(self.nu0))
         sumNu = np.sum(self.nu)
-        self.lnKappa = psi(self.nu) - psi(sumNu)
+        self.lnkappa = psi(self.nu) - psi(sumNu)
         
-    def initLnPi(self):
+    def init_alpha0(self):
+        if len(self.alpha0_seed.shape)<3: #alpha0_seed needs to be duplicated
+            self.alpha0 = np.array(self.alpha0_seed[:,:,np.newaxis], dtype=np.float64)
+            self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
+        else: #alpha0_seed is the complete set of initial pseudocounts
+            self.alpha0 = self.alpha0_seed        
+        
+    def init_lnPi(self):
+        #if alpha is already initialised, and no new agents, skip this
         if self.alpha!=[] and self.alpha.shape[2]==self.K:
             return
-        if len(self.alpha0.shape)<3:
-            self.alpha0 = np.array(self.alpha0[:,:,np.newaxis], dtype=np.float64)
-            self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
-        oldK = self.alpha0.shape[2] 
-        if oldK<self.K:
-            nnew = self.K - oldK
+                
+        #ensure alpha0 is the right size
+        #First run -- alpha0 is not initialised
+        if self.alpha0==None:
+            self.init_alpha0()
+        #Not first run but new agents have submitted crowdlabels
+        elif self.alpha0.shape[2] < self.K:
+            nnew = self.K - self.alpha0.shape[2]
             alpha0new = self.alpha0[:,:,0]
             alpha0new = alpha0new[:,:,np.newaxis]
             alpha0new = np.repeat(alpha0new, nnew, axis=2)
@@ -281,257 +302,139 @@ class Ibcc(object):
 
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
-        self.lnPi = np.zeros((self.nClasses,self.nScores,self.K))
-        for s in range(self.nScores):        
+        self.lnPi = np.zeros((self.nclasses,self.nscores,self.K))
+        for s in range(self.nscores):        
             self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha 
         
-    def initT(self):        
+    def init_t(self):        
         kappa = self.nu / np.sum(self.nu, axis=0)        
-        self.ET = np.zeros((self.nObjs,self.nClasses)) + kappa  
+        self.E_t = np.zeros((self.N,self.nclasses)) + kappa  
         
-    def __init__(self, nClasses, nScores, alpha0, nu0, K, tableFormat=False):
-        self.nClasses = nClasses
-        self.nScores = nScores
-        self.alpha0 = alpha0
-        self.nu0 = nu0
-        self.K = K
-        self.initParams()
-        if tableFormat:
-            self.crowdTable = True
+    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, table_format=False, dh=None):
+        if dh != None:
+            self.nclasses = dh.nclasses
+            self.nscores = len(dh.scores)
+            self.alpha0_seed = dh.alpha0
+            self.nu0 = dh.nu0
+            self.K = dh.K
+            table_format = dh.table_format
         else:
-            self.crowdTable = None             
-
-def loadCrowdLabels(inputFile, scores):   
-    '''
-    Loads labels from crowd in sparse list format, i.e. 3 columns, classifier ID,
-    object ID, score.
-    '''
-    pyFileExists = False
-    try:
-        with open(inputFile+'.dat','r') as inFile:
-            crowdLabels, tIdxs, K = pickle.load(inFile)
-            pyFileExists = True
-    except Exception:
-        logging.info('Will try to load a CSV file...')
-    
-        crowdLabels = np.genfromtxt(inputFile, delimiter=',', \
-                                skip_header=1,usecols=[0,1,2])
-
-        tIdxs, crowdLabels[:,1] = np.unique(crowdLabels[:,1],return_inverse=True)
-        kIdxs, crowdLabels[:,0] = np.unique(crowdLabels[:,0],return_inverse=True)
-        K = len(kIdxs)
+            self.nclasses = nclasses
+            self.nscores = nscores
+            self.alpha0_seed = alpha0
+            self.nu0 = nu0
+            self.K = K
         
-    unmappedScores = np.round(crowdLabels[:,2])
-    for i,s in enumerate(scores):
-        crowdLabels[(unmappedScores==s),2] = i
-    
-    maxT = np.max(tIdxs)
-    blanks = np.zeros(len(tIdxs))
-    idxList = range(len(tIdxs))
-    
-    tIdxMap = coo_matrix(( idxList, (tIdxs,blanks)), shape=(maxT+1,1) )
-    tIdxMap = tIdxMap.tocsr()
-    
-    if not pyFileExists:
-        try:
-            with open(inputFile+'.dat', 'wb') as outFile:
-                pickle.dump((crowdLabels,tIdxs,K), outFile)
-        except Exception:
-            logging.error('Could not save the input data as a Python object file.')
-    
-    return crowdLabels, tIdxMap, tIdxs, K, len(tIdxs), np.max(tIdxs)
-    
-def loadCrowdTable(inputFile, scores):
-    '''
-    Loads crowd labels in a table format
-    '''
-    unmappedScores = np.round(np.genfromtxt(inputFile, delimiter=','))
-    
-    #tIdxs, crowdLabels[:,1] = np.unique(crowdLabels[:,1],return_inverse=True)
-    #kIdxs, crowdLabels[:,0] = np.unique(crowdLabels[:,0],return_inverse=True)
-    K = unmappedScores.shape[1]
-    N = unmappedScores.shape[0]
-    tIdxs = range(N)
+        self.init_params()
+        if table_format:
+            self.table_format_flag = True
+        else:
+            self.table_format_flag = None        
+        
+    def unflatten_hyperparams(self,hyperparams):
+        alpha_shape = self.alpha0_seed.shape
+        n_alpha_elements = np.prod(alpha_shape)        
+        alpha0 = hyperparams[0:n_alpha_elements].reshape(alpha_shape)
+        nu0 = hyperparams[n_alpha_elements:]
+        
+        return alpha0,nu0
             
-    crowdTable = np.zeros((N,K))
-    for i,s in enumerate(scores):
-        crowdTable[unmappedScores==s] = i
-    
-    maxT = np.max(tIdxs)
-    blanks = np.zeros(len(tIdxs))
-    
-    tIdxMap = coo_matrix(( tIdxs, (tIdxs,blanks)), shape=(maxT+1,1) )
-    tIdxMap = tIdxMap.tocsr()
-    return (crowdTable, tIdxMap, tIdxs, K, len(tIdxs)), N
-    
-def loadGold(goldFile, tIdxMap, nObjs, maxOrigIdx, classLabels=None, secondaryTypeCol=-1):   
-    
-    import os.path
-    if not os.path.isfile(goldFile):
-        logging.warning('No gold labels found.')
-        gold = np.zeros(nObjs) -1
-        return gold, None
-    
-    if secondaryTypeCol>-1:
-        useCols=[0,1,secondaryTypeCol]
+    def ln_modelprior(self):
+        #Gamma distribution over each value. Set the params of the gammas.
+        p_alpha0 = gamma.logpdf(self.alpha0_seed, self.gam_shape_alpha, scale=self.gam_scale_alpha)
+        p_nu0 = gamma.logpdf(self.nu0, self.gam_shape_nu, scale=self.gam_scale_nu)
+        
+        return np.sum(np.sum(np.sum(p_alpha0))) + np.sum(p_nu0)
+            
+    def neg_marginal_likelihood(self, hyperparams):
+        #Reshape to get alpha0 again
+        self.alpha0_seed, self.nu0 = self.unflatten_hyperparams(hyperparams)
+        self.init_alpha0() #reinitialise with new hyperparams
+        self.expec_lnPi() #ensure new alpha0 values are used
+        self.vb_inference() #run inference algorithm
+        
+        lnjoint = self.expec_t() 
+        data_loglikelihood = self.post_lnjoint_ct(lnjoint)
+        
+        log_model_prior = self.ln_modelprior()
+        
+        ml = data_loglikelihood + log_model_prior
+        
+        return -ml #returns Negative!
+        
+    def combine_classifications(self, crowdlabels, goldlabels, optimise_hyperparams=True):
+                
+        self.preprocess_training(crowdlabels, goldlabels)
+        self.init_t()
+        self.init_K()
+        self.preprocess_crowdlabels()          
+        
+        if optimise_hyperparams:
+            self.optimise_hyperparams()
+            return self.E_t
+        else:
+            return self.vb_inference()
+        
+    def optimise_hyperparams(self):
+        #Initialise the hyperhyperparams
+        self.gam_shape_alpha = np.float(self.gam_shape_alpha)
+        self.gam_shape_nu = np.float(self.gam_shape_nu)
+        
+        self.gam_scale_alpha = self.alpha0_seed/self.gam_shape_alpha
+        self.gam_scale_nu = self.nu0/self.gam_shape_nu
+
+        #Evaluate the first guess using the mean hyperparams
+        initialguess = np.concatenate((self.alpha0_seed.flatten(),self.nu0.flatten()))
+        negml = self.neg_marginal_likelihood(initialguess)
+        logging.info("Initial guess marginal log likelihood: " + str(-negml))        
+        
+        #Run the optimisation
+        combfunc = self.neg_marginal_likelihood
+        xopt,_,niterations,_,_ = fmin(func=combfunc, x0=initialguess, maxiter=1000, full_output=True)
+        #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
+        self.alpha0_seed, self.nu0 = self.unflatten_hyperparams(xopt)
+        
+        logging.info("Hyperparameters optimised using ML or MAP estimation: ")
+        logging.info("alpha0: " + str(self.alpha0_seed))
+        logging.info("nu0: " + str(self.nu0))
+        self.noptiter = niterations 
+        
+        logging.info("Rerunning to produce results with these optimal hyperparams.")   
+        
+        #Return an evaluation using the chosen values
+        negml = self.neg_marginal_likelihood(xopt)
+        logging.info("Maximum marginal log likelihood: " + str(-negml))
+        
+            
+def load_combiner(config_file, ibcc_class=None):
+    dh = DataHandler()
+    dh.loadData(config_file)
+    if ibcc_class==None:
+        combiner = IBCC(dh=dh)
     else:
-        useCols=[0,1]
-        
-    try:
-        gold = np.genfromtxt(goldFile, delimiter=',', skip_header=0,usecols=useCols,invalid_raise=True)
-    except Exception:
-        gold = np.genfromtxt(goldFile, delimiter=',', skip_header=0)
-        
-    if np.any(np.isnan(gold[0])): #skip header if necessary
-        gold = gold[1:,:]
-    logging.debug("gold shape: " + str(gold.shape))
-    
-    if len(gold.shape)==1 or gold.shape[1]==1: #position in this list --> id of data point
-        goldLabels = gold
-    else: # sparse format: first column is id of data point, second column is gold label value
-        
-        #map the original idxs to local idxs
-        valid_gold_idxs = np.argwhere(gold[:,0]<=maxOrigIdx)
-        gold = gold[valid_gold_idxs.reshape(-1),:]
-        goldIdxs = gold[:,0]
-        goldIdxs = tIdxMap[goldIdxs,0].todense()
-        
-        #create an array for gold for all the objects/data points in this test set
-        goldLabels = np.zeros(nObjs) -1
-        goldLabels[goldIdxs] = gold[:,1]
-        
-        #if there is secondary type info, create a similar array for this
-        if secondaryTypeCol>-1:
-            goldTypes = np.zeros(nObjs)
-            goldTypes[goldIdxs] = gold[:,2]
-            goldTypes[np.isnan(goldTypes)] = 0 #some examples may have no type info
-            goldTypes[goldLabels==-1] = -1 #negative examples have type -1
-          
-    if classLabels:
-        #convert text to class IDs
-        for i in range(gold.shape[0]):
-            classIdx = np.where(classLabels==goldLabels[i])
-            if classIdx:
-                goldLabels[i] = classIdx
-            else:
-                goldLabels[i] = -1
-    
-    if secondaryTypeCol>-1:
-        return goldLabels, goldTypes
-    else: 
-        return goldLabels, None
+        combiner = ibcc_class(dh=dh)
+    return combiner, dh
 
-def initFromConfig(configFile, K, tableFormat=False):
-    nClasses = 2
-    scores = np.array([3, 4])
-    nu0 = np.array([50.0, 50.0])
-    alpha0 = np.array([[2, 1], [1, 2]])     
-        
-    #read configuration
-    with open(configFile, 'r') as conf:
-        configuration = conf.read()
-        exec(configuration)        
-        
-    nScores = len(scores)
-    #initialise combiner
-    combiner = Ibcc(nClasses, nScores, alpha0, nu0, K, tableFormat)
-    
-    return combiner
-    
-def loadData(configFile):
-    
-    #Defaults that will usually be overwritten by project config
-    inputFile = './data/input.csv'
-    tableFormat = False
-    #columns in input file:
-    # 0 = agent/worker/volunteer ID
-    # 1 = object ID
-    # 2 = scores given to the object
-    goldFile = './data/gold.csv'
-    #columns in gold file
-    # 0 = object ID
-    # 1 = class label
-    scores = np.array([3, 4])
-    
-    outputFile =  './output/output.csv'
-    confMatFile = None#'./output/confMat.csv'
-    classLabels = None
-  
-    trainIds = None #IDs of targets that should be used as training data. Optional 
-    
-    #column index of secondary type information about the data points stored in the gold file. 
-    #-1 means no such info
-    goldTypeCol = -1
-    
-    def translateGold(gold):
-        return gold
-    
-    #read configuration
-    with open(configFile, 'r') as conf:
-        configuration = conf.read()
-        exec(configuration)    
-
-    #load labels from crowd
-    if tableFormat:
-        crowdLabels, tIdxMap, tIdxs, K, nObjs, maxOrigIdx = loadCrowdTable(inputFile, scores)
-    else:
-        crowdLabels, tIdxMap, tIdxs, K, nObjs, maxOrigIdx = loadCrowdLabels(inputFile, scores)
-    
-    #load gold labels if present
-    gold, goldTypes = loadGold(goldFile, tIdxMap, nObjs, maxOrigIdx, classLabels, goldTypeCol)
-        
-    gold = translateGold(gold)
-    
-    #map the training IDs to our local indexes
-    if trainIds != None:
-        trainIds = tIdxMap[trainIds,0].todense()
-    
-    return K,tableFormat,crowdLabels,gold,tIdxs,trainIds,outputFile,confMatFile,goldTypes             
-
-def loadCombiner(configFile):
-    K,tableFormat,crowdLabs,gold,origCandIds,trIdxs,outFile,confMatFile,goldTypes = loadData(configFile)
-    combiner = initFromConfig(configFile, K, tableFormat)
-    return combiner, crowdLabs, gold, origCandIds, trIdxs,outFile,confMatFile,goldTypes
-
-def saveTargets(pT, tIdxs, outputFile):
-    #write predicted class labels to file
-    logging.info('writing results to file')
-    logging.debug('Posterior matrix: ' + str(pT.shape))
-    tIdxs = np.reshape(tIdxs, (len(tIdxs),1))
-    logging.debug('Target indexes: ' + str(tIdxs.shape))    
-    np.savetxt(outputFile, np.concatenate([tIdxs, pT], 1))
-
-def save_pi(alpha, nClasses, nScores, K, confMatFile):
-    #write confusion matrices to file if required
-    if not confMatFile is None:
-        logging.info('writing confusion matrices to file')
-        pi = np.zeros((nClasses,nScores,K))
-        for l in range(nScores):
-            pi[:,l,:] = alpha[:,l,:]/np.sum(alpha,1)
-        
-        flatPi = pi.reshape(1, nClasses*nScores, K)
-        flatPi = np.swapaxes(flatPi, 0, 2)
-        np.savetxt(confMatFile, flatPi.reshape(K, nClasses*nScores), fmt='%1.3f')    
-
-def runIbcc(configFile):
-    K,tableFormat,crowdLabels,gold,tIdxs,_,outputFile,confMatFile,_ = loadData(configFile)
-    combiner = initFromConfig(configFile, K, tableFormat)
-        
+def runIbcc(configFile, ibcc_class=None, optimise_hyperparams=True):
+    combiner, dh = load_combiner(configFile, ibcc_class)
     #combine labels
-    pT = combiner.combineClassifications(crowdLabels, gold)
+    pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams)
 
-    if outputFile != None:
-        saveTargets(pT, tIdxs, outputFile)
-    if confMatFile != None:
-        save_pi(combiner.alpha, combiner.nClasses, combiner.nScores, combiner.K, confMatFile)
-    
+    if dh.output_file != None:
+        dh.save_targets(pT)
+
+    dh.save_pi(combiner.alpha, combiner.nclasses, combiner.nscores)
+    dh.save_hyperparams(combiner.alpha, combiner.nu, combiner.noptiter)
     return pT, combiner
     
 if __name__ == '__main__':
-
+    
+    logging.basicConfig(level=logging.INFO)
+    
     if len(sys.argv)>1:
         configFile = sys.argv[1]
     else:
         configFile = './config/my_project.py'
     runIbcc(configFile)
+    
     
