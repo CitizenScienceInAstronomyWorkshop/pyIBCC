@@ -252,21 +252,23 @@ class DataHandler(object):
         logging.debug('Target indexes: ' + str(tIdxs.shape))    
         np.savetxt(self.output_file, np.concatenate([tIdxs, pT], 1))
     
-    def save_pi(self, alpha):
+    def save_pi(self, alpha, nclasses, nscores):
         #write confusion matrices to file if required
         if self.confmat_file is None or self.confmat_file=='':
             return
-        
-        nscores = self.scores.size
+
+        # the defaults which existed before they were read in as param
+        # nscores = self.scores.size
+        # nclasses = self.nclasses
     
         logging.info('writing confusion matrices to file')
         pi = np.zeros(alpha.shape)
         for l in range(nscores):
             pi[:,l,:] = alpha[:,l,:]/np.sum(alpha,1)
         
-        flatPi = pi.reshape(1, self.nclasses*nscores, alpha.shape[2])
+        flatPi = pi.reshape(1, nclasses*nscores, alpha.shape[2])
         flatPi = np.swapaxes(flatPi, 0, 2)
-        flatPi = flatPi.reshape(alpha.shape[2], self.nclasses*nscores)
+        flatPi = flatPi.reshape(alpha.shape[2], nclasses*nscores)
         np.savetxt(self.confmat_file, flatPi, fmt='%1.3f')
         
     def save_hyperparams(self, alpha, nu, niterations):    
