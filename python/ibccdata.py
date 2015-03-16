@@ -118,6 +118,7 @@ class DataHandler(object):
         if not os.path.isfile(self.gold_file):
             logging.warning('No gold labels found.')
             self.goldlabels = np.zeros(self.N) -1
+            return
         
         if secondaryTypeCol>-1:
             useCols=[0,1,secondaryTypeCol]
@@ -208,10 +209,17 @@ class DataHandler(object):
         with open(configFile, 'r') as conf:
             configuration = conf.read()
             exec(configuration)
-            
-        self.output_file = outputFile % testid
-        self.confmat_file = confMatFile % testid
-        self.hyperparam_file = hyperparam_file  % testid
+
+        print hyperparam_file
+        print testid
+        try:
+            self.output_file = outputFile % testid
+            self.confmat_file = confMatFile % testid
+            self.hyperparam_file = hyperparam_file  % testid
+        except TypeError:
+            self.output_file = outputFile
+            self.confmat_file = confMatFile
+            self.hyperparam_file = hyperparam_file
         self.input_file = inputFile
         self.gold_file = goldFile
         self.scores = scores
