@@ -187,8 +187,7 @@ class IBCC(object):
         crowdlabels = self.desparsify_crowdlabels(crowdlabels)
         if train_t != None and self.sparse:
             self.full_train_t = train_t
-            if self.full_N < len(self.full_train_t):
-                self.full_N = len(self.full_train_t)
+            self.full_N = len(self.full_train_t)
             train_t = train_t[self.observed_idxs]
         # Find out how much training data and how many total data points we have
         len_t = 0  # length of the training vector
@@ -213,9 +212,11 @@ class IBCC(object):
         # record the test and train idxs
         self.trainidxs = self.train_t > -1
         self.Ntrain = np.sum(self.trainidxs)
-        if testidxs != None:
+        if testidxs != None:  # include the prespecified set of unlabelled data points in the inference process. All
+            # other data points are either training data or ignored.
             self.testidxs = testidxs[self.observed_idxs]
-        else:
+        else:  # If the test indexes are not specified explicitly, assume that all data points with a NaN or a -1 in the
+            # training data must be test indexes.
             self.testidxs = np.bitwise_or(np.isnan(self.train_t), self.train_t < 0)
         # Now preprocess the crowdlabels.
         #Check that we have the right number of agents/base classifiers, K
@@ -232,10 +233,12 @@ class IBCC(object):
                 Cl = np.zeros(crowdlabels.shape)
                 Cl[crowdlabels == l] = 1
                 if not self.discretedecisions:
-                    partly_l_idxs = np.bitwise_and(crowdlabels > l, crowdlabels < l + 1)  # partly above l
-                    Cl[partly_l_idxs] = (l + 1) - crowdlabels[partly_l_idxs]
-                    partly_l_idxs = np.bitwise_and(crowdlabels < l, crowdlabels > l - 1)  # partly below l
-                    Cl[partly_l_idxs] = crowdlabels[partly_l_idxs] - l + 1
+                    if l + 1 < self.nscores:
+                        partly_l_idxs = np.bitwise_and(crowdlabels > l, crowdlabels < l + 1)  # partly above l
+                        Cl[partly_l_idxs] = (l + 1) - crowdlabels[partly_l_idxs]
+                    if l > 0:
+                        partly_l_idxs = np.bitwise_and(crowdlabels < l, crowdlabels > l - 1)  # partly below l
+                        Cl[partly_l_idxs] = crowdlabels[partly_l_idxs] - l + 1
                 C[l] = Cl
         else:
             for l in range(self.nscores):
