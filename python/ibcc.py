@@ -415,7 +415,7 @@ def load_combiner(config_file, ibcc_class=None):
         combiner = ibcc_class(dh=dh)
     return combiner, dh
 
-def runIbcc(configFile, ibcc_class=None, optimise_hyperparams=True):
+def runIbcc(configFile, ibcc_class=None, optimise_hyperparams=False):
     combiner, dh = load_combiner(configFile, ibcc_class)
     #combine labels
     pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams)
