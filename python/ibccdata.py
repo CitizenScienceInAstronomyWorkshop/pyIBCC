@@ -116,7 +116,7 @@ class DataHandler(object):
         
         import os.path
         if not os.path.isfile(self.gold_file):
-            logging.warning('No gold labels found.')
+            logging.info('No gold labels found -- running in unsupervised mode.')
             self.goldlabels = np.zeros(self.N) -1
             return
         
@@ -199,7 +199,7 @@ class DataHandler(object):
         confMatFile = ''#'./output/confMat.csv'
         hyperparam_file = ''
         inputFile = './data/input.csv'
-        goldFile = './data/gold.csv'
+        goldFile = ''#./data/gold.csv'
         
         nClasses = 2
         nu0 = self.nu0
