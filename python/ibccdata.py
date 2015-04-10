@@ -22,6 +22,8 @@ class DataHandler(object):
     alpha0 = np.array([[2, 1], [1, 2]])  
 
     ####################################
+    
+    uselowerbound = False
 
     crowdlabels = None
     table_format = False
@@ -45,6 +47,14 @@ class DataHandler(object):
         Constructor
         '''
         
+    def create_target_idx_map(self):
+        self.max_targetid = np.max(self.targetidxs) # largest original ID value
+        blanks = np.zeros(len(self.targetidxs)) # only need 1D so set all to zero
+        idxList = range(len(self.targetidxs)) # new local idxs
+        tIdxMap = coo_matrix(( idxList, (self.targetidxs,blanks)), shape=(self.max_targetid+1,1) )       
+        self.N = len(self.targetidxs)
+        self.targetidxmap = tIdxMap.tocsr() # maps Original IDs to new local idxs
+        
     def loadCrowdLabels(self, scores):   
         '''
         Loads labels from crowd in sparse list format, i.e. 3 columns, classifier ID,
@@ -67,15 +77,13 @@ class DataHandler(object):
             
         unmappedScores = np.round(crowdLabels[:,2])
         for i,s in enumerate(scores):
+            print np.sum(unmappedScores==s)
             crowdLabels[(unmappedScores==s),2] = i
         
-        maxT = np.max(self.targetidxs)
-        blanks = np.zeros(len(self.targetidxs))
-        idxList = range(len(self.targetidxs))
-        
-        tIdxMap = coo_matrix(( idxList, (self.targetidxs,blanks)), shape=(maxT+1,1) )
-        tIdxMap = tIdxMap.tocsr()
-        
+        self.create_target_idx_map()
+        self.crowdlabels = crowdLabels
+        self.K = K
+        print crowdLabels.shape
         if not pyFileExists:
             try:
                 with open(self.input_file+'.dat', 'wb') as outFile:
@@ -83,34 +91,19 @@ class DataHandler(object):
             except Exception:
                 logging.error('Could not save the input data as a Python object file.')
         
-        self.crowdlabels = crowdLabels
-        self.targetidxmap = tIdxMap
-        self.K = K
-        self.N = len(self.targetidxs)
-        self.max_targetid = np.max(self.targetidxs)
-        
     def loadCrowdTable(self, scores):
         '''
         Loads crowd labels in a table format
         '''
         unmappedScores = np.round(np.genfromtxt(self.input_file, delimiter=','))
-        
-        #targetidxs, crowdlabels[:,1] = np.unique(crowdlabels[:,1],return_inverse=True)
-        #kIdxs, crowdlabels[:,0] = np.unique(crowdlabels[:,0],return_inverse=True)
         self.K = unmappedScores.shape[1]
-        self.N = unmappedScores.shape[0]
-        self.targetidxs = range(self.N)
-                
-        self.table_format_flag = np.zeros((self.N,self.K))
+        self.targetidxs = np.arange(unmappedScores.shape[0])
+        self.create_target_idx_map()
+                   
+        self.crowdlabels = np.empty((self.N,self.K))
+        self.crowdlabels[:,:] = np.nan
         for i,s in enumerate(scores):
-            self.table_format_flag[unmappedScores==s] = i
-        
-        maxT = np.max(self.targetidxs)
-        blanks = np.zeros(len(self.targetidxs))
-        
-        tIdxMap = coo_matrix(( self.targetidxs, (self.targetidxs,blanks)), shape=(maxT+1,1) )
-        self.targetidxmap = tIdxMap.tocsr()
-        self.max_targetid = self.N
+            self.crowdlabels[unmappedScores==s] = i
         
     def loadGold(self, classLabels=None, secondaryTypeCol=-1):   
         
@@ -136,12 +129,26 @@ class DataHandler(object):
         
         if len(gold.shape)==1 or gold.shape[1]==1: #position in this list --> id of data point
             goldLabels = gold
+            goldIdxs = np.arange(len(goldLabels))
+            missing_idxs = [i for i in goldIdxs if not i in self.targetidxs]
+            if len(missing_idxs):
+                #There are more gold labels than data points with crowd labels.
+                self.targetidxs = np.concatenate((self.targetidxs,missing_idxs))
+                self.create_target_idx_map()
         else: # sparse format: first column is id of data point, second column is gold label value
             
             #map the original idxs to local idxs
-            valid_gold_idxs = np.argwhere(gold[:,0]<=self.max_targetid)
-            gold = gold[valid_gold_idxs.reshape(-1),:]
+            # -- Commented out because we shouldn't remove data points that have no crowd labels
+            #valid_gold_idxs = np.argwhere(gold[:,0]<=self.max_targetid)
+            #gold = gold[valid_gold_idxs.reshape(-1),:]
             goldIdxs = gold[:,0]
+            # -- Instead, we must append the missing indexes to the list of targets
+            missing_idxs = [i for i in goldIdxs if not i in self.targetidxs]
+            if len(missing_idxs):
+                self.targetidxs = np.concatenate((self.targetidxs,missing_idxs))
+                self.create_target_idx_map()
+            
+            #map the IDs to their local index values
             goldIdxs = self.targetidxmap[goldIdxs,0].todense()
             
             #create an array for gold for all the objects/data points in this test set
@@ -168,6 +175,15 @@ class DataHandler(object):
         if secondaryTypeCol>-1:
             self.goldsubtypes = goldTypes
         
+    def map_predictions_to_original_IDs(self, predictions, return_array=True):
+        rows = np.tile(self.targetidxs.reshape((self.N,1)), (1,self.nclasses)).flatten()
+        cols = np.tile(np.arange(self.nclasses), (self.N,1)).flatten()
+        data = predictions.flatten()
+        mapped_predictions = coo_matrix((data, (rows,cols)), shape=(self.max_targetid+1, self.nclasses))
+        if return_array:
+            mapped_predictions = mapped_predictions.toarray()
+        return mapped_predictions
+                
     def loadData(self, configFile):
         
         testid="unknowntest"
@@ -204,6 +220,7 @@ class DataHandler(object):
         nClasses = 2
         nu0 = self.nu0
         alpha0 = self.alpha0 
+        uselowerbound = self.uselowerbound
         
         #read configuration
         with open(configFile, 'r') as conf:
@@ -226,6 +243,7 @@ class DataHandler(object):
         self.nclasses = nClasses
         self.nu0 = nu0
         self.alpha0 = alpha0
+        self.uselowerbound = uselowerbound
     
         #load labels from crowd
         if tableFormat:

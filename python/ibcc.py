@@ -4,408 +4,517 @@
 import sys, logging
 import numpy as np
 from copy import deepcopy
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csr_matrix
 from scipy.special import psi, gammaln
 from ibccdata import DataHandler
 from scipy.optimize import fmin
 from scipy.stats import gamma
 
 class IBCC(object):
-    
-    uselowerbound = True #may be quicker not to calculate this
-    
+# Print extra debug info
+    verbose = True
+    keeprunning = True # set to false causes the combine_classifications method to exit without completing if another 
+    # thread is checking whether IBCC is taking too long. Probably won't work well if the optimize_hyperparams is true.
+    noptiter = 0 # Number of optimisation iterations used to find the current hyper-parameters.    
+# Configuration for variational Bayes (VB) algorithm for approximate inference -------------------------------------
+    # determine convergence by calculating lower bound? Quicker to set=False so we check convergence of target variables
+    uselowerbound = False
     min_iterations = 1
     max_iterations = 500
     conv_threshold = 0.0001
-    
-    table_format_flag = False #crowd labels as a full KxnObjs table? 
-    #Otherwise, use 
-    # a sparse 3-column list, where 1st column=classifier ID, 2nd column = 
-    # obj ID, 3rd column = score.
-    crowdlabels = None
-    
+# Data set attributes -----------------------------------------------------------------------------------------------
+    discretedecisions = False  # If true, decisions are rounded to discrete integers. If false, you can submit undecided
+    # responses as fractions between two classes. E.g. 2.3 means that 0.3 of the decision will go to class 3, and 0.7
+    # will go to class 2. Only neighbouring classes can have uncertain decisions in this way.
+    table_format_flag = False  
     nclasses = None
     nscores = None
-    alpha0 = None
-    nu0 = None
     K = None
     N = 0 #number of objects
-    
+    Ntrain = 0  # no. training objects
+    Ntest = 0  # no. test objects
+    # Sparsity handling
+    sparse = False
+    observed_idxs = []
+    full_N = 0
+    # The data from the crowd
+    C = None
+    Ctest = None # data for the test points (excluding training)
+    goldlabels = None
+    # Indices into the current data set
+    trainidxs = None
+    testidxs = None
+    conf_mat_ind = []  # indices into the confusion matrices corresponding to the current set of crowd labels
+    # the joint likelihood (interim value saved to reduce computation)
+    lnpCT = None  
+# Model parameters and hyper-parameters -----------------------------------------------------------------------------
     #The model
+    alpha0 = None
+    nu0 = None    
     lnkappa = []
     nu = []
     lnPi = []
     alpha = []
     E_t = []
-    
-    observed_idxs = []
-    
-    keeprunning = True # set to false causes the combine_classifications method to exit without completing
-    
-    #hyperprior parameters
-    gam_scale_alpha = None  #Gamma distribution params 
-    gam_shape_alpha = 5 #Gamma distribution params --> confidence in seed values
-    
-    gam_scale_nu = None
-    gam_shape_nu = 5
-    
-    noptiter = 0
-
-    def expec_lnkappa(self):#Posterior Hyperparams
-        sumET = np.sum(self.E_t[self.observed_idxs,:], 0)
-        for j in range(self.nclasses):
-            self.nu[j] = self.nu0[j] + sumET[j]
-        self.lnkappa = psi(self.nu) - psi(np.sum(self.nu))
-       
-    def post_Alpha(self):#Posterior Hyperparams -- move back to static IBCC
-        for j in range(self.nclasses):
-            for l in range(self.nscores):
-                Tj = self.E_t[:,j].reshape((self.N,1))
-                counts = self.C[l].T.dot(Tj).reshape(-1)
-                self.alpha[j,l,:] = self.alpha0[j,l,:] + counts
-       
-    def expec_lnPi(self):#Posterior Hyperparams
-        self.post_Alpha()
-        sumAlpha = np.sum(self.alpha, 1)
-        psiSumAlpha = psi(sumAlpha)
-        for s in range(self.nscores):        
-            self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha
-        
-    def lnjoint_table(self):
-        lnjoint = np.zeros((self.N, self.nclasses))
-        agentIdx = np.tile(np.transpose(range(self.K)), (self.N,1)) 
-    
-        for j in range(self.nclasses):
-            lnjoint[:,j] = np.sum(self.lnPi[j,self.table_format_flag,agentIdx],1) + self.lnkappa[j]
-        return lnjoint
-        
-    def lnjoint_sparselist(self):
-        lnjoint = np.zeros((self.N, self.nclasses))
-        for j in range(self.nclasses):
-            data = self.lnPi[j,self.crowdlabels[:,2],self.crowdlabels[:,0]].reshape(-1)
-            rows = self.crowdlabels[:,1].reshape(-1)
-            cols = np.zeros(self.crowdlabels.shape[0])
-            
-            likelihood_j = coo_matrix((data, (rows,cols)), shape=(self.N,1)).todense()
-            lnjoint[:,j] = likelihood_j.reshape(-1) + self.lnkappa[j]      
-        return lnjoint
-        
-    def lnjoint(self):
-        if self.table_format_flag != None:
-            return self.lnjoint_table()
-        else:
-            return self.lnjoint_sparselist()
-
-    def expec_t(self):
-        
-        self.E_t = np.zeros((self.N, self.nclasses))
-        pT = joint = np.zeros((self.N, self.nclasses))
-        lnjoint = self.lnjoint()
-            
-        #ensure that the values are not too small
-        largest = np.max(lnjoint, 1)
-        for j in range(self.nclasses):
-            joint[:,j] = lnjoint[:,j] - largest
-            
-        joint = np.exp(joint)
-        norma = np.sum(joint, axis=1)
-        for j in range(self.nclasses):
-            pT[:,j] = joint[:,j]/norma
-            self.E_t[:,j] = pT[:,j]
-            
-        for j in range(self.nclasses):            
-            #training labels
-            row = np.zeros((1,self.nclasses))
-            row[0,j] = 1
-            self.E_t[self.train_t==j,:] = row    
-            
-        return lnjoint
-      
-    def post_lnjoint_ct(self, lnjoint):
-        lnpCT = np.sum(np.sum( lnjoint*self.E_t ))                        
-        return lnpCT      
-            
-    #Is this right?!!! Should be prior not post?
-    def post_lnkappa(self):
-        lnpKappa = gammaln(np.sum(self.nu0))-np.sum(gammaln(self.nu0)) \
-                    + sum((self.nu0-1)*self.lnkappa)
-        return lnpKappa
-        
-    def q_lnkappa(self):
-        lnqKappa = gammaln(np.sum(self.nu))-np.sum(gammaln(self.nu)) \
-                        + np.sum((self.nu-1)*self.lnkappa)
-        return lnqKappa
-    
-    def q_ln_t(self):
-        ET = self.E_t[self.E_t!=0]
-        return np.sum( ET*np.log(ET) )
-        
-    def lowerbound(self, lnjoint):
-                        
-        #probability of these targets is 1 as they are training labels
-        #lnjoint[self.train_t!=-1,:] -= np.reshape(self.lnkappa, (1,self.nclasses))
-        lnpCT = self.post_lnjoint_ct(lnjoint)                    
-                        
-        #alpha0 = np.reshape(self.alpha0, (self.nclasses, self.nscores, self.K))
-        lnpPi = gammaln(np.sum(self.alpha0, 1))-np.sum(gammaln(self.alpha0),1) \
-                    + np.sum((self.alpha0-1)*self.lnPi, 1)
-        lnpPi = np.sum(np.sum(lnpPi))
-            
-        lnpKappa = self.post_lnkappa()
-            
-        EEnergy = lnpCT + lnpPi + lnpKappa
-        
-        lnqT = self.q_ln_t()
-
-        lnqPi = gammaln(np.sum(self.alpha, 1))-np.sum(gammaln(self.alpha),1) + \
-                    np.sum( (self.alpha-1)*self.lnPi, 1)
-        lnqPi = np.sum(np.sum(lnqPi))        
-            
-        lnqKappa = self.q_lnkappa()
-            
-        H = - lnqT - lnqPi - lnqKappa
-        L = EEnergy + H
-        
-        #logging.debug('EEnergy ' + str(EEnergy) + ', H ' + str(H))
-        return L
-        
-    def preprocess_training(self, crowdlabels, train_t=None):
-        
-        # Is this necessary? Prevents uncertain labels from crowd!
-        crowdlabels = crowdlabels.astype(int) 
-        self.crowdlabels = crowdlabels
-        if crowdlabels.shape[1]!=3:
-            self.table_format_flag = True
-        
-        if train_t==None:
-            if self.table_format_flag:
-                train_t = np.zeros(self.crowdlabels.shape[0]) -1
-            else:
-                train_t = np.zeros( len(np.unique(self.crowdlabels[:,1])) ) -1
-        
-        self.train_t = train_t
-        self.N = train_t.shape[0]        
-        
-    def preprocess_crowdlabels(self):
-        #ensure we don't have a matrix by mistake
-        if not isinstance(self.crowdlabels, np.ndarray):
-            self.crowdlabels = np.array(self.crowdlabels)
-        C = {}
-        if self.table_format_flag:            
-            for l in range(self.nscores):
-                Cl = np.zeros(self.crowdlabels.shape)
-                Cl[self.crowdlabels==l] = 1
-                C[l] = Cl
-            self.observed_idxs = np.argwhere(np.sum(self.crowdlabels,axis=1)>=0)             
-        else:            
-            for l in range(self.nscores):
-                lIdxs = np.where(self.crowdlabels[:,2]==l)[0]     
-                data = np.array(np.ones((len(lIdxs),1))).reshape(-1)
-                rows = np.array(self.crowdlabels[lIdxs,1]).reshape(-1)
-                cols = np.array(self.crowdlabels[lIdxs,0]).reshape(-1)     
-                Cl = coo_matrix((data,(rows,cols)), shape=(self.N, self.K))
-                C[l] = Cl
-            self.observed_idxs = np.unique(self.crowdlabels[:,1])
-        self.C = C
-        
-    def init_K(self):
-        if self.table_format_flag :
-            newK = self.crowdlabels.shape[1]
-        else:
-            newK = np.max(self.crowdlabels[:,0])
-        if self.K<=newK:
-            self.K = newK+1 #+1 since we start from 0
-            self.init_params() 
-    
-    def vb_inference(self):
-              
-        logging.info('IBCC Combining...')
-        oldL = -np.inf
-        converged = False
-        self.nIts = 0 #object state so we can check it later
-
-        while not converged and self.keeprunning:
-            oldET = self.E_t
-            #play around with the order you start these in:
-            #Either update the params using the priors+training labels for t
-            #Or update the targets using the priors for the params
-            #Usually prefer the latter so that all data points contribute meaningful info,
-            #since the targets for the test data will be inited only to the kappa-priors, 
-            #and training data is often insufficient -> could lead to biased result 
-
-            #update targets
-            lnjoint = self.expec_t() 
-
-            #update params
-            self.expec_lnkappa()
-            self.expec_lnPi()
-        
-            #check convergence        
-            if self.uselowerbound:
-                L = self.lowerbound(lnjoint)
-                logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L-oldL))
-                change = L-oldL                
-                oldL = L
-            else:
-                change = np.sum(np.sum(np.absolute(oldET - self.E_t)))            
-            self.nIts+=1
-            if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>=self.min_iterations:
-                converged = True
-            if change<-0.00001: #use this small value so we don't worry about likely rounding errors
-                logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
-            else:
-                logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
-                
-        logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
-        return self.E_t
-        
-    def init_params(self):
-        logging.debug('Initialising parameters...') 
-        logging.debug('Alpha0: ' + str(self.alpha0))
-        self.init_lnPi()
-        
-        logging.debug('Nu0: ' + str(self.nu0))
-        self.init_lnkappa()
-        
-    def init_lnkappa(self):
-        if self.nu!=[]:
-            return
-        self.nu = deepcopy(np.float64(self.nu0))
-        sumNu = np.sum(self.nu)
-        self.lnkappa = psi(self.nu) - psi(sumNu)
-        
-    def init_alpha0(self):
-        if len(self.alpha0_seed.shape)<3: #alpha0_seed needs to be duplicated
-            self.alpha0 = np.array(self.alpha0_seed[:,:,np.newaxis], dtype=np.float64)
-            self.alpha0 = np.repeat(self.alpha0, self.K, axis=2)
-        else: #alpha0_seed is the complete set of initial pseudocounts
-            self.alpha0 = self.alpha0_seed        
-        
-    def init_lnPi(self):
-        #if alpha is already initialised, and no new agents, skip this
-        if self.alpha!=[] and self.alpha.shape[2]==self.K:
-            return
-                
-        #ensure alpha0 is the right size
-        #First run -- alpha0 is not initialised
-        if self.alpha0==None:
-            self.init_alpha0()
-        #Not first run but new agents have submitted crowdlabels
-        elif self.alpha0.shape[2] < self.K:
-            nnew = self.K - self.alpha0.shape[2]
-            alpha0new = self.alpha0[:,:,0]
-            alpha0new = alpha0new[:,:,np.newaxis]
-            alpha0new = np.repeat(alpha0new, nnew, axis=2)
-            self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
-            
-        self.alpha = deepcopy(np.float64(self.alpha0))#np.float64(self.alpha0[:,:,np.newaxis])
-
-        sumAlpha = np.sum(self.alpha, 1)
-        psiSumAlpha = psi(sumAlpha)
-        self.lnPi = np.zeros((self.nclasses,self.nscores,self.K))
-        for s in range(self.nscores):        
-            self.lnPi[:,s,:] = psi(self.alpha[:,s,:]) - psiSumAlpha 
-        
-    def init_t(self):        
-        kappa = self.nu / np.sum(self.nu, axis=0)        
-        self.E_t = np.zeros((self.N,self.nclasses)) + kappa  
-        
-    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, table_format=False, dh=None):
+    #hyper-hyper-parameters: the parameters for the hyper-prior over the hyper-parameters. These are only used if you
+    # run optimize_hyperparams
+    gam_scale_alpha = []  #Gamma distribution scale parameters 
+    gam_shape_alpha = 10 #Gamma distribution shape parameters --> confidence in seed values
+    gam_scale_nu = []
+    gam_shape_nu = 200
+# Initialisation ---------------------------------------------------------------------------------------------------
+    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, dh=None):
         if dh != None:
             self.nclasses = dh.nclasses
             self.nscores = len(dh.scores)
-            self.alpha0_seed = dh.alpha0
+            self.alpha0 = dh.alpha0
             self.nu0 = dh.nu0
             self.K = dh.K
-            table_format = dh.table_format
+            self.uselowerbound = dh.uselowerbound
         else:
             self.nclasses = nclasses
             self.nscores = nscores
-            self.alpha0_seed = alpha0
+            self.alpha0 = alpha0
             self.nu0 = nu0
             self.K = K
         
-        self.init_params()
-        if table_format:
-            self.table_format_flag = True
+    def init_params(self, force_reset=False):
+        '''
+        Checks that parameters are intialized, but doesn't overwrite them if already set up.
+        '''
+        if self.verbose:
+            logging.debug('Initialising parameters...Alpha0: ' + str(self.alpha0))
+        #if alpha is already initialised, and no new agents, skip this
+        if self.alpha == [] or self.alpha.shape[2] != self.K or force_reset:
+            self.init_lnPi()
+        if self.verbose:
+            logging.debug('Nu0: ' + str(self.nu0))
+        if self.nu ==[] or force_reset:
+            self.init_lnkappa()
+
+    def init_lnkappa(self):
+        # Ensure we have float arrays so we can do division with these parameters properly
+        self.nu0 = self.nu0.astype(float)
+        self.nu = deepcopy(np.float64(self.nu0))
+        sumNu = np.sum(self.nu)
+        self.lnkappa = psi(self.nu) - psi(sumNu)
+
+    def init_lnPi(self):
+        '''
+        Always creates new self.alpha and self.lnPi objects and calculates self.alpha and self.lnPi values according to 
+        either the prior, or where available, values of self.E_t from previous runs.
+        '''
+        self.alpha0 = self.alpha0.astype(float)
+        # if we specify different alpha0 for some agents, we need to do so for all K agents. The last agent passed in 
+        # will be duplicated for any missing agents.
+        if len(self.alpha0.shape) == 3 and self.alpha0.shape[2] < self.K:
+            # We have a new dataset with more agents than before -- create more priors.
+            nnew = self.K - self.alpha0.shape[2]
+            alpha0new = self.alpha0[:, :, 0]
+            alpha0new = alpha0new[:, :, np.newaxis]
+            alpha0new = np.repeat(alpha0new, nnew, axis=2)
+            self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
+        elif len(self.alpha0.shape)==2:
+            self.alpha0  = self.alpha0[:,:,np.newaxis]
+        # Make sure self.alpha is the right size as well. Values of self.alpha not important as we recalculate below
+        self.alpha = np.zeros((self.nclasses, self.nscores, self.K), dtype=np.float) + self.alpha0
+        self.lnPi = np.zeros((self.nclasses, self.nscores, self.K))        
+        self.expec_lnPi()
+
+    def init_t(self):
+        self.nu0 = self.nu0.astype(float)
+        kappa = self.nu0 / np.sum(self.nu0, axis=0)
+        if len(self.E_t) > 0:
+            if self.sparse:
+                oldE_t = self.E_t_sparse
+            else:
+                oldE_t = self.E_t
+            Nold = oldE_t.shape[0]
+            if Nold > self.N:
+                Nold = self.N
         else:
-            self.table_format_flag = None        
+            oldE_t = []
+        self.E_t = np.zeros((self.N, self.nclasses)) + kappa
+        if len(oldE_t) > 0:
+            self.E_t[0:Nold, :] = oldE_t[0:Nold, :]
+        uncert_trainidxs = self.trainidxs.copy()  # look for labels that are not discrete values of valid classes
+        for j in range(self.nclasses):
+            # training labels
+            row = np.zeros((1, self.nclasses))
+            row[0, j] = 1
+            jidxs = self.goldlabels == j
+            uncert_trainidxs = uncert_trainidxs - jidxs
+            self.E_t[jidxs, :] = row
+        # deal with uncertain training idxs
+        for j in range(self.nclasses):
+            # values a fraction above class j
+            partly_j_idxs = np.bitwise_and(self.goldlabels[uncert_trainidxs] > j, self.goldlabels[uncert_trainidxs] < j + 1)
+            partly_j_idxs = uncert_trainidxs[partly_j_idxs]
+            self.E_t[partly_j_idxs, j] = (j + 1) - self.goldlabels[partly_j_idxs]
+            # values a fraction below class j
+            partly_j_idxs = np.bitwise_and(self.goldlabels[uncert_trainidxs] < j, self.goldlabels[uncert_trainidxs] > j - 1)
+            partly_j_idxs = uncert_trainidxs[partly_j_idxs]
+            self.E_t[partly_j_idxs, j] = self.goldlabels[partly_j_idxs] - j + 1
+        if self.sparse:
+            self.E_t_sparse = self.E_t  # current working version is sparse            
+
+# Data preprocessing and helper functions --------------------------------------------------------------------------
+    def desparsify_crowdlabels(self, crowdlabels):
+        if self.table_format_flag:
+            # First, record which objects were actually observed.
+            self.observed_idxs = np.argwhere(np.sum(np.isfinite(crowdlabels), axis=1) > 0).reshape(-1)
+            # full set of test points will include those with crowd labels = NaN, unless gold labels are passed in 
+            self.full_N = crowdlabels.shape[0]             
+            if crowdlabels.shape[0] > len(self.observed_idxs):
+                self.sparse = True
+                # cut out the unobserved data points. We'll put them back in at the end of the classification procedure.
+                crowdlabels = crowdlabels[self.observed_idxs, :]
+        else:
+            self.observed_idxs, mappedidxs = np.unique(crowdlabels[:, 1], return_inverse=True)
+            self.full_N = np.max(crowdlabels[:,1])
+            if self.full_N > len(self.observed_idxs):
+                self.sparse = True
+                # map the IDs so we skip unobserved data points. We'll map back at the end of the classification procedure.
+                crowdlabels[:, 1] = mappedidxs
+        return crowdlabels
+
+    def preprocess_goldlabels(self, goldlabels):
+        if goldlabels != None and self.sparse:
+            if self.full_N<len(goldlabels):
+                # the full set of test points that we output will come from the gold labels if longer than crowd labels
+                self.full_N = len(goldlabels)
+            goldlabels = goldlabels[self.observed_idxs]
+            
+        # Find out how much training data and how many total data points we have
+        if goldlabels != None:
+            len_t = goldlabels.shape[0]
+            goldlabels[np.isnan(goldlabels)] = -1
+        else:
+            len_t = 0  # length of the training vector
+        len_c = len(self.observed_idxs)# length of the crowdlabels
+        # How many data points in total?
+        if len_c > len_t:
+            self.N = len_c
+        else:
+            self.N = len_t        
+             
+        # Make sure that goldlabels is the right size in case we have passed in a training set for the first idxs
+        if goldlabels == None:
+            self.goldlabels = np.zeros(self.N) - 1
+        elif goldlabels.shape[0] < self.N:
+            extension = np.zeros(self.N - goldlabels.shape[0]) - 1
+            self.goldlabels = np.concatenate((goldlabels, extension))
+        else:
+            self.goldlabels = goldlabels
+            
+    def set_test_and_train_idxs(self, testidxs=None):
+        # record the test and train idxs
+        self.trainidxs = self.goldlabels > -1
+        self.Ntrain = np.sum(self.trainidxs)
         
+        if testidxs != None:  # include the pre-specified set of unlabelled data points in the inference process. All
+            # other data points are either training data or ignored.
+            self.testidxs = testidxs[self.observed_idxs]
+        else:  # If the test indexes are not specified explicitly, assume that all data points with a NaN or a -1 in the
+            # training data must be test indexes.
+            self.testidxs = np.bitwise_or(np.isnan(self.goldlabels), self.goldlabels < 0)
+        self.Ntest = np.sum(self.testidxs)            
+            
+    def preprocess_crowdlabels(self, crowdlabels):
+        # Initialise all objects relating to the crowd labels.
+        C = {}
+        crowdlabels[np.isnan(crowdlabels)] = -1
+        if self.discretedecisions:
+            crowdlabels = np.round(crowdlabels).astype(int)
+        if self.table_format_flag:# crowd labels as a full KxN table? If false, use a sparse 3-column list, where 1st
+            # column=classifier ID, 2nd column = obj ID, 3rd column = score.
+            self.K = crowdlabels.shape[1]
+            for l in range(self.nscores):
+                Cl = np.zeros((self.N, self.K))
+                #crowd labels may not be supplied for all N data points in the gold labels, so use argwhere
+                lidxs = np.argwhere(crowdlabels==l)
+                Cl[lidxs[:,0], lidxs[:,1]] = 1
+                if not self.discretedecisions:
+                    if l + 1 < self.nscores:
+                        partly_l_idxs = np.bitwise_and(crowdlabels > l, crowdlabels < (l+1))  # partly above l
+                        Cl[partly_l_idxs] = (l + 1) - crowdlabels[partly_l_idxs]
+                    if l > 0:
+                        partly_l_idxs = np.bitwise_and(crowdlabels < l, crowdlabels > (l-1))  # partly below l
+                        Cl[partly_l_idxs] = crowdlabels[partly_l_idxs] - l + 1
+                C[l] = Cl
+        else:
+            self.K = np.nanmax(crowdlabels[:,0])+1 # add one because indexes start from 0
+            for l in range(self.nscores):
+                lIdxs = np.argwhere(crowdlabels[:, 2] == l)[:,0]
+                data = np.ones((len(lIdxs), 1)).reshape(-1)
+                rows = np.array(crowdlabels[lIdxs, 1]).reshape(-1)
+                cols = np.array(crowdlabels[lIdxs, 0]).reshape(-1)
+                
+                if not self.discretedecisions:
+                    partly_l_idxs = np.bitwise_and(crowdlabels[:, 2] > l, crowdlabels[:, 2] < l + 1)  # partly above l
+                    data = np.concatenate((data, (l + 1) - crowdlabels[partly_l_idxs, 2]))
+                    rows = np.concatenate((rows, crowdlabels[partly_l_idxs, 1].reshape(-1)))
+                    cols = np.concatenate((cols, crowdlabels[partly_l_idxs, 0].reshape(-1)))
+                    
+                    partly_l_idxs = np.bitwise_and(crowdlabels[:, 2] < l, crowdlabels[:, 2] > l - 1)  # partly below l
+                    data = np.concatenate((data, crowdlabels[partly_l_idxs, 2] - l + 1))
+                    rows = np.concatenate((rows, crowdlabels[partly_l_idxs, 1].reshape(-1)))
+                    cols = np.concatenate((cols, crowdlabels[partly_l_idxs, 0].reshape(-1)))
+                    Cl = csr_matrix(coo_matrix((data,(rows,cols)), shape=(self.N, self.K)))
+                C[l] = Cl
+        # Set and reset object properties for the new dataset
+        self.C = C
+        self.lnpCT = np.zeros((self.N, self.nclasses))
+        self.conf_mat_ind = []
+        # pre-compute the indices into the pi arrays
+        # repeat for test labels only
+        
+        self.Ctest = {}
+        for l in range(self.nscores):
+            self.Ctest[l] = C[l][self.testidxs, :]
+        # Reset the pre-calculated data for the training set in case goldlabels has changed
+        self.alpha_tr = []
+# Run the inference algorithm --------------------------------------------------------------------------------------    
+    def combine_classifications(self, crowdlabels, goldlabels=None, testidxs=None, optimise_hyperparams=False, table_format=False):
+        self.table_format_flag = table_format
+        oldK = self.K
+        crowdlabels = self.desparsify_crowdlabels(crowdlabels)
+        self.preprocess_goldlabels(goldlabels)        
+        self.set_test_and_train_idxs(testidxs)
+        self.preprocess_crowdlabels(crowdlabels)
+        self.init_t()
+        #Check that we have the right number of agents/base classifiers, K, and initialise parameters if necessary
+        if self.K != oldK or self.nu == [] or self.alpha==[]:  # data shape has changed or not initialised yet
+            self.init_params()
+        # Either run the model optimisation or just use the inference method with fixed hyper-parameters  
+        if optimise_hyperparams:
+            self.optimize_hyperparams()
+        else:
+            self.run_inference()        
+        # Convert back to original indexes in case of unobserved IDs
+        if self.sparse:
+            E_t_full = np.zeros((self.full_N,self.nclasses))
+            E_t_full[:] = (np.exp(self.lnkappa) / np.sum(np.exp(self.lnkappa))).reshape((1, self.nclasses))
+            E_t_full[self.observed_idxs,:] = self.E_t
+            self.E_t_sparse = self.E_t  # save the sparse version
+            self.E_t = E_t_full        
+        return self.E_t        
+
+    def run_inference(self):   
+        '''
+        Variational approximate inference. Assumes that all data and hyper-parameters are ready for use. Overwrite
+        do implement EP or Gibbs' sampling etc.
+        '''
+        logging.info('IBCC: combining to predict ' + str(np.sum(self.testidxs)) + " test data points...")
+        oldL = -np.inf
+        converged = False
+        self.nIts = 0 #object state so we can check it later
+        while not converged and self.keeprunning:
+            oldET = self.E_t.copy()
+            #update targets
+            self.expec_t()
+            #update params
+            self.expec_lnkappa()
+            self.expec_lnPi()
+            #check convergence        
+            if self.uselowerbound:
+                L = self.lowerbound()
+                if self.verbose:
+                    logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L - oldL))
+                change = L-oldL
+                oldL = L
+            else:
+                change = np.max(np.sum(np.absolute(oldET - self.E_t)))
+            if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>self.min_iterations:
+                converged = True
+            self.nIts+=1
+            if change < -0.001 and self.verbose:                
+                logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
+            elif self.verbose:
+                logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
+        logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
+
+# Posterior Updates to Hyperparameters --------------------------------------------------------------------------------
+    def post_Alpha(self):  # Posterior Hyperparams
+        # Save the counts from the training data so we only recalculate the test data on every iteration
+        if self.alpha_tr == []:
+            self.alpha_tr = self.alpha.copy()
+            for j in range(self.nclasses):
+                for l in range(self.nscores):
+                    Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
+                    self.alpha_tr[j,l,:] = self.C[l][self.trainidxs,:].T.dot(Tj).reshape(-1)
+            self.alpha_tr += self.alpha0
+        # Add the counts from the test data
+        for j in range(self.nclasses):
+            for l in range(self.nscores):
+                Tj = self.E_t[self.testidxs, j].reshape((self.Ntest, 1))
+                counts = self.Ctest[l].T.dot(Tj).reshape(-1)
+                self.alpha[j, l, :] = self.alpha_tr[j, l, :] + counts
+# Expectations: methods for calculating expectations with respect to parameters for the VB algorithm ------------------
+    def expec_lnkappa(self):
+        sumET = np.sum(self.E_t, 0)
+        for j in range(self.nclasses):
+            self.nu[j] = self.nu0[j] + sumET[j]
+        self.lnkappa = psi(self.nu) - psi(np.sum(self.nu))
+
+    def expec_lnPi(self):
+        # check if E_t has been initialised. Only update alpha if it has. Otherwise E[lnPi] is given by the prior
+        if self.E_t != []:
+            self.post_Alpha()
+        sumAlpha = np.sum(self.alpha, 1)
+        psiSumAlpha = psi(sumAlpha)
+        for s in range(self.nscores): 
+            self.lnPi[:, s, :] = psi(self.alpha[:, s, :]) - psiSumAlpha      
+
+    def expec_t(self):
+        self.lnjoint()
+        joint = self.lnpCT
+        joint = joint[self.testidxs, :]
+        # ensure that the values are not too small
+        largest = np.max(joint, 1)[:, np.newaxis]
+        joint = joint - largest
+        joint = np.exp(joint)
+        norma = np.sum(joint, axis=1)[:, np.newaxis]
+        pT = joint / norma
+        self.E_t[self.testidxs, :] = pT      
+# Likelihoods of observations and current estimates of parameters --------------------------------------------------
+    def lnjoint(self, alldata=False):
+        '''
+        For use with crowdsourced data in table format (should be converted on input)
+        '''
+        if self.uselowerbound or alldata:
+            for j in range(self.nclasses):
+                data = []
+                for l in range(self.nscores):
+                    if self.table_format_flag:
+                        data_l = self.C[l] * self.lnPi[j, l, :][np.newaxis,:]
+                    else:
+                        data_l = self.C[l].multiply(self.lnPi[j, l, :][np.newaxis,:])
+                    data = data_l if data==[] else data+data_l
+                self.lnpCT[:, j] = np.array(np.sum(data, 1)).reshape(-1) + self.lnkappa[j]
+        else:  # no need to calculate in full
+            for j in range(self.nclasses):
+                data = []
+                for l in range(self.nscores):
+                    if self.table_format_flag:
+                        data_l = self.Ctest[l] * self.lnPi[j, l, :][np.newaxis,:]
+                    else:
+                        data_l = self.Ctest[l].multiply(self.lnPi[j, l, :][np.newaxis,:])
+                    data = data_l if data==[] else data+data_l
+                self.lnpCT[self.testidxs, j] = np.array(np.sum(data, 1)).reshape(-1) + self.lnkappa[j]
+        
+    def post_lnkappa(self):
+        lnpKappa = gammaln(np.sum(self.nu0)) - np.sum(gammaln(self.nu0)) + sum((self.nu0 - 1) * self.lnkappa)
+        return lnpKappa
+        
+    def q_lnkappa(self):
+        lnqKappa = gammaln(np.sum(self.nu)) - np.sum(gammaln(self.nu)) + np.sum((self.nu - 1) * self.lnkappa)
+        return lnqKappa
+
+    def q_ln_t(self):
+        ET = self.E_t[self.E_t != 0]
+        return np.sum(ET * np.log(ET))         
+
+    def post_lnpi(self):
+        x = np.sum((self.alpha0-1) * self.lnPi,1)
+        z = gammaln(np.sum(self.alpha0,1)) - np.sum(gammaln(self.alpha0),1)
+        return np.sum(x+z)
+                    
+    def q_lnPi(self):
+        x = np.sum((self.alpha-1) * self.lnPi,1)
+        z = gammaln(np.sum(self.alpha,1)) - np.sum(gammaln(self.alpha),1)
+        return np.sum(x+z)
+# Lower Bound ---------------------------------------------------------------------------------------------------------       
+    def lowerbound(self):
+        # Expected Energy: entropy given the current parameter expectations
+        lnpCT = self.post_lnjoint_ct()
+        lnpPi = self.post_lnpi()
+        lnpKappa = self.post_lnkappa()
+        EEnergy = lnpCT + lnpPi + lnpKappa
+        # Entropy of the variational distribution
+        lnqT = self.q_ln_t()
+        lnqPi = self.q_lnPi()
+        lnqKappa = self.q_lnkappa()
+        H = lnqT + lnqPi + lnqKappa
+        # Lower Bound
+        L = EEnergy - H
+        # logging.debug('EEnergy ' + str(EEnergy) + ', H ' + str(H))
+        return L
+# Hyperparameter Optimisation ------------------------------------------------------------------------------------------
     def unflatten_hyperparams(self,hyperparams):
-        alpha_shape = self.alpha0_seed.shape
+        initialK = (len(hyperparams) - self.nclasses) / (self.nclasses * self.nscores)
+        alpha_shape = (self.nclasses, self.nscores, initialK)
         n_alpha_elements = np.prod(alpha_shape)        
         alpha0 = hyperparams[0:n_alpha_elements].reshape(alpha_shape)
-        nu0 = hyperparams[n_alpha_elements:]
-        
+        nu0 = hyperparams[-self.nclasses:]
         return alpha0,nu0
-            
+    
+    def post_lnjoint_ct(self):
+        # If we have not already calculated lnpCT for the lower bound, then make sure we recalculate using all data
+        if not self.uselowerbound:
+            self.lnjoint(alldata=True)
+        lnpCT = self.lnpCT + self.lnkappa 
+        return np.sum(self.E_t * lnpCT)
+                
     def ln_modelprior(self):
-        #Gamma distribution over each value. Set the params of the gammas.
-        p_alpha0 = gamma.logpdf(self.alpha0_seed, self.gam_shape_alpha, scale=self.gam_scale_alpha)
+        #Check and initialise the hyper-hyper-parameters if necessary
+        if self.gam_scale_alpha==[]:
+            self.gam_shape_alpha = np.float(self.gam_shape_alpha)
+            # if the scale was not set, assume current values of alpha0 are the means given by the hyper-prior
+            self.gam_scale_alpha = self.alpha0/self.gam_shape_alpha
+        if self.gam_scale_nu==[]:
+            self.gam_shape_nu = np.float(self.gam_shape_nu)
+            # if the scale was not set, assume current values of nu0 are the means given by the hyper-prior
+            self.gam_scale_nu = self.nu0/self.gam_shape_nu
+        
+        #Gamma distribution over each value. Set the parameters of the gammas.
+        p_alpha0 = gamma.logpdf(self.alpha0, self.gam_shape_alpha, scale=self.gam_scale_alpha)
         p_nu0 = gamma.logpdf(self.nu0, self.gam_shape_nu, scale=self.gam_scale_nu)
         
-        return np.sum(np.sum(np.sum(p_alpha0))) + np.sum(p_nu0)
-            
-    def neg_marginal_likelihood(self, hyperparams):
-        #Reshape to get alpha0 again
-        self.alpha0_seed, self.nu0 = self.unflatten_hyperparams(hyperparams)
-        self.init_alpha0() #reinitialise with new hyperparams
-        self.expec_lnPi() #ensure new alpha0 values are used
-        self.vb_inference() #run inference algorithm
-        
-        lnjoint = self.expec_t() 
-        data_loglikelihood = self.post_lnjoint_ct(lnjoint)
-        
-        log_model_prior = self.ln_modelprior()
-        
-        ml = data_loglikelihood + log_model_prior
-        
-        return -ml #returns Negative!
-        
-    def combine_classifications(self, crowdlabels, goldlabels, optimise_hyperparams=True):
-                
-        self.preprocess_training(crowdlabels, goldlabels)
-        self.init_t()
-        self.init_K()
-        self.preprocess_crowdlabels()          
-        
-        if optimise_hyperparams:
-            self.optimise_hyperparams()
-            return self.E_t
-        else:
-            return self.vb_inference()
-        
-    def optimise_hyperparams(self):
-        #Initialise the hyperhyperparams
-        self.gam_shape_alpha = np.float(self.gam_shape_alpha)
-        self.gam_shape_nu = np.float(self.gam_shape_nu)
-        
-        self.gam_scale_alpha = self.alpha0_seed/self.gam_shape_alpha
-        self.gam_scale_nu = self.nu0/self.gam_shape_nu
+        return np.sum(p_alpha0) + np.sum(p_nu0)
 
-        #Evaluate the first guess using the mean hyperparams
-        initialguess = np.concatenate((self.alpha0_seed.flatten(),self.nu0.flatten()))
-        negml = self.neg_marginal_likelihood(initialguess)
-        logging.info("Initial guess marginal log likelihood: " + str(-negml))        
+    def neg_marginal_likelihood(self, hyperparams):
+        '''
+        Weight the marginal log data likelihood by the hyper-prior. Unnormalised posterior over the hyper-parameters.
+        '''
+        if self.verbose:
+            logging.debug("Hyper-parameters: %s" % str(hyperparams))
+        if np.any(np.isnan(hyperparams)) or np.any(hyperparams <= 0):
+            return np.inf
+        self.alpha0, self.nu0 = self.unflatten_hyperparams(hyperparams)
         
-        #Run the optimisation
-        combfunc = self.neg_marginal_likelihood
-        xopt,_,niterations,_,_ = fmin(func=combfunc, x0=initialguess, maxiter=1000, full_output=True)
+        #ensure new alpha0 and nu0 values are used when updating E_t
+        self.init_params(force_reset=True)
+        #run inference algorithm
+        self.run_inference() 
+        
+        #calculate likelihood from the fitted model
+        data_loglikelihood = self.post_lnjoint_ct()
+        log_model_prior = self.ln_modelprior()
+        lml = data_loglikelihood + log_model_prior
+        logging.debug("Log joint probability of the model & data: %f" % lml)
+        return -lml #returns Negative!
+ 
+    def optimize_hyperparams(self, maxiter=200):
+        ''' 
+        Assuming gamma distributions over the hyper-parameters, we find the MAP values. The combiner object is updated
+        to contain the optimal values, searched for using BFGS.
+        '''
+        #Evaluate the first guess using the current value of the hyper-parameters
+        initialguess = np.concatenate((self.alpha0.flatten(), self.nu0.flatten()))
+        opt_hyperparams,_,niterations,_,_ = fmin(self.neg_marginal_likelihood, initialguess, maxiter=maxiter, full_output=True)
         #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
-        self.alpha0_seed, self.nu0 = self.unflatten_hyperparams(xopt)
         
+        self.alpha0, self.nu0 = self.unflatten_hyperparams(opt_hyperparams)
         logging.info("Hyperparameters optimised using ML or MAP estimation: ")
-        logging.info("alpha0: " + str(self.alpha0_seed))
-        logging.info("nu0: " + str(self.nu0))
+        logging.info("alpha0: " + str(self.alpha0))
+        logging.info("nu0: " + str(self.nu0))        
         self.noptiter = niterations 
+        logging.debug("Optimal hyperparams: %s" % str(opt_hyperparams))
         
-        logging.info("Rerunning to produce results with these optimal hyperparams.")   
-        
-        #Return an evaluation using the chosen values
-        negml = self.neg_marginal_likelihood(xopt)
-        logging.info("Maximum marginal log likelihood: " + str(-negml))
-        
-            
+        return self.E_t
+    
+# Loader and Runner helper functions -------------------------------------------------------------------------------
 def load_combiner(config_file, ibcc_class=None):
     dh = DataHandler()
     dh.loadData(config_file)
@@ -415,16 +524,19 @@ def load_combiner(config_file, ibcc_class=None):
         combiner = ibcc_class(dh=dh)
     return combiner, dh
 
-def runIbcc(configFile, ibcc_class=None, optimise_hyperparams=False):
+def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
     combiner, dh = load_combiner(configFile, ibcc_class)
     #combine labels
-    pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams)
+    combiner.verbose = True
+    pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
+                                          table_format=dh.table_format)
 
     if dh.output_file != None:
         dh.save_targets(pT)
 
     dh.save_pi(combiner.alpha, combiner.nclasses, combiner.nscores)
     dh.save_hyperparams(combiner.alpha, combiner.nu, combiner.noptiter)
+    pT = dh.map_predictions_to_original_IDs(pT)
     return pT, combiner
     
 if __name__ == '__main__':
@@ -435,6 +547,4 @@ if __name__ == '__main__':
         configFile = sys.argv[1]
     else:
         configFile = './config/my_project.py'
-    runIbcc(configFile)
-    
-    
+    load_and_run_ibcc(configFile)
