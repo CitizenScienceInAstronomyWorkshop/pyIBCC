@@ -95,6 +95,10 @@ class IBCC(object):
     def init_lnkappa(self):
         # Ensure we have float arrays so we can do division with these parameters properly
         self.nu0 = self.nu0.astype(float)
+        if self.nu0.ndim==1:
+            self.nu0 = self.nu0.reshape((1, self.nclasses))
+        elif self.nu0.shape[0]!=self.nclasses and self.nu0.shape[1]==self.nclasses:
+            self.nu0 = self.nu0.T
         self.nu = deepcopy(np.float64(self.nu0))
         sumNu = np.sum(self.nu)
         self.lnkappa = psi(self.nu) - psi(sumNu)
@@ -122,7 +126,7 @@ class IBCC(object):
         self.expec_lnPi()
 
     def init_t(self):
-        self.nu0 = self.nu0.astype(float)
+        self.nu0 = self.nu0.astype(float).reshape((1,self.nclasses))
         kappa = self.nu0 / np.sum(self.nu0, axis=0)
         if len(self.E_t) > 0:
             if self.sparse:
@@ -160,6 +164,10 @@ class IBCC(object):
 
 # Data preprocessing and helper functions --------------------------------------------------------------------------
     def desparsify_crowdlabels(self, crowdlabels):
+        '''
+        Converts the IDs of data points in the crowdlabels to a set of consecutive integer indexes. If a data point has
+        no crowdlabels when using table format, it will be skipped.   
+        '''
         if self.table_format_flag:
             # First, record which objects were actually observed.
             self.observed_idxs = np.argwhere(np.sum(np.isfinite(crowdlabels), axis=1) > 0).reshape(-1)
@@ -170,7 +178,8 @@ class IBCC(object):
                 # cut out the unobserved data points. We'll put them back in at the end of the classification procedure.
                 crowdlabels = crowdlabels[self.observed_idxs, :]
         else:
-            self.observed_idxs, mappedidxs = np.unique(crowdlabels[:, 1], return_inverse=True)
+            crowdobjects = crowdlabels[:,1].astype(int)
+            self.observed_idxs, mappedidxs = np.unique(crowdobjects, return_inverse=True)
             self.full_N = np.max(crowdlabels[:,1])
             if self.full_N > len(self.observed_idxs):
                 self.sparse = True
@@ -274,8 +283,25 @@ class IBCC(object):
             self.Ctest[l] = C[l][self.testidxs, :]
         # Reset the pre-calculated data for the training set in case goldlabels has changed
         self.alpha_tr = []
+        
+    def resparsify_t(self):
+        '''
+        Puts the expectations of target values, E_t, at the points we observed crowd labels back to their original 
+        indexes in the output array. Values are inserted for the unobserved indices using only kappa (class proportions).
+        '''
+        E_t_full = np.zeros((self.full_N,self.nclasses))
+        E_t_full[:] = (np.exp(self.lnkappa) / np.sum(np.exp(self.lnkappa),axis=0)).T
+        E_t_full[self.observed_idxs,:] = self.E_t
+        self.E_t_sparse = self.E_t  # save the sparse version
+        self.E_t = E_t_full        
+        
 # Run the inference algorithm --------------------------------------------------------------------------------------    
     def combine_classifications(self, crowdlabels, goldlabels=None, testidxs=None, optimise_hyperparams=False, table_format=False):
+        '''
+        Takes crowdlabels in either sparse list or table formats, along with optional training labels (goldlabels)
+        and applies data-preprocessing steps before running inference for the model parameters and target labels.
+        Returns the expected values of the target labels.
+        '''
         self.table_format_flag = table_format
         oldK = self.K
         crowdlabels = self.desparsify_crowdlabels(crowdlabels)
@@ -290,14 +316,9 @@ class IBCC(object):
         if optimise_hyperparams:
             self.optimize_hyperparams()
         else:
-            self.run_inference()        
-        # Convert back to original indexes in case of unobserved IDs
+            self.run_inference() 
         if self.sparse:
-            E_t_full = np.zeros((self.full_N,self.nclasses))
-            E_t_full[:] = (np.exp(self.lnkappa) / np.sum(np.exp(self.lnkappa))).reshape((1, self.nclasses))
-            E_t_full[self.observed_idxs,:] = self.E_t
-            self.E_t_sparse = self.E_t  # save the sparse version
-            self.E_t = E_t_full        
+            self.resparsify_t()
         return self.E_t        
 
     def run_inference(self):   
@@ -453,8 +474,7 @@ class IBCC(object):
         # If we have not already calculated lnpCT for the lower bound, then make sure we recalculate using all data
         if not self.uselowerbound:
             self.lnjoint(alldata=True)
-        lnpCT = self.lnpCT + self.lnkappa 
-        return np.sum(self.E_t * lnpCT)
+        return np.sum(self.E_t * self.lnpCT)
                 
     def ln_modelprior(self):
         #Check and initialise the hyper-hyper-parameters if necessary
