@@ -77,6 +77,13 @@ class IBCC(object):
             self.alpha0 = alpha0
             self.nu0 = nu0
             self.K = K
+            
+        # Ensure we have float arrays so we can do division with these parameters properly
+        self.nu0 = self.nu0.astype(float)
+        if self.nu0.ndim==1:
+            self.nu0 = self.nu0.reshape((self.nclasses,1))
+        elif self.nu0.shape[0]!=self.nclasses and self.nu0.shape[1]==self.nclasses:
+            self.nu0 = self.nu0.T            
         
     def init_params(self, force_reset=False):
         '''
@@ -93,12 +100,6 @@ class IBCC(object):
             self.init_lnkappa()
 
     def init_lnkappa(self):
-        # Ensure we have float arrays so we can do division with these parameters properly
-        self.nu0 = self.nu0.astype(float)
-        if self.nu0.ndim==1:
-            self.nu0 = self.nu0.reshape((1, self.nclasses))
-        elif self.nu0.shape[0]!=self.nclasses and self.nu0.shape[1]==self.nclasses:
-            self.nu0 = self.nu0.T
         self.nu = deepcopy(np.float64(self.nu0))
         sumNu = np.sum(self.nu)
         self.lnkappa = psi(self.nu) - psi(sumNu)
@@ -126,8 +127,7 @@ class IBCC(object):
         self.expec_lnPi()
 
     def init_t(self):
-        self.nu0 = self.nu0.astype(float).reshape((1,self.nclasses))
-        kappa = self.nu0 / np.sum(self.nu0, axis=0)
+        kappa = (self.nu0 / np.sum(self.nu0, axis=0)).T
         if len(self.E_t) > 0:
             if self.sparse:
                 oldE_t = self.E_t_sparse
