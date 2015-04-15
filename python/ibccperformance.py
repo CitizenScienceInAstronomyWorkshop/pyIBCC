@@ -81,6 +81,10 @@ class Evaluator(object):
             testresults = self.pT[self.testIdxs,1:]
         if labels==[]:
             labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
+            
+        if testresults.ndim == 1:
+            testresults = testresults.reshape((len(testresults),1))
+            
         labelmatrix = np.zeros((len(labels),self.nclasses-1)) 
         for j in range(1,self.nclasses):
             labelmatrix[labels==j,j-1] = 1

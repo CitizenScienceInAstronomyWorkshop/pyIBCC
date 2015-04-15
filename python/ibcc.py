@@ -63,7 +63,7 @@ class IBCC(object):
     gam_scale_nu = []
     gam_shape_nu = 200
 # Initialisation ---------------------------------------------------------------------------------------------------
-    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, dh=None):
+    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, uselowerbound=False, dh=None):
         if dh != None:
             self.nclasses = dh.nclasses
             self.nscores = len(dh.scores)
@@ -77,6 +77,7 @@ class IBCC(object):
             self.alpha0 = alpha0
             self.nu0 = nu0
             self.K = K
+            self.uselowerbound = uselowerbound
             
         # Ensure we have float arrays so we can do division with these parameters properly
         self.nu0 = self.nu0.astype(float)
