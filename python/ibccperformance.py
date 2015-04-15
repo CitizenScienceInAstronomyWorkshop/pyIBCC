@@ -110,18 +110,24 @@ class Evaluator(object):
     def eval_crossentropy(self, testresults=[], labels=[]):
         if testresults==[]:
             testresults = self.pT[self.testIdxs,:]
-        elif testresults.ndim==1:
-            testresults.shape = (testresults.size,1)
+        elif testresults.ndim==1 and labels.ndim != 1:
+            testresults = testresults.reshape(testresults.size,1)
             testresults = np.concatenate((testresults,1-testresults), axis=1)             
         if labels==[]:
             labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
-                
-        crossentropy = -np.log(testresults[:,labels])
-        infidxs = np.isinf(crossentropy)
-        print "number of infinite entropy data points: " + str(np.sum(infidxs==True))
-        crossentropy[infidxs] = -np.log(0.0000001)
+        if labels.ndim==1 and testresults.ndim!=1:
+            labels = labels.reshape(labels.size,1)
+            labels = np.concatenate((labels,1-labels), axis=1)
+            
+        if labels.ndim==1 and testresults.ndim==1:
+            negidxs = labels==0
+            testresults[negidxs] = 1-testresults[negidxs]
+        
+        zeroidxs = testresults==0
+        testresults[zeroidxs] = 0.0000001
+        crossentropy = -np.log(testresults[labels==1])        
         print "number of cross entropy points: " + str(crossentropy.size)
-        crossentropy = np.sum(crossentropy)/labels.size
+        crossentropy = np.sum(crossentropy)/labels.shape[0]
         return crossentropy    
     
     def eval_results(self):
