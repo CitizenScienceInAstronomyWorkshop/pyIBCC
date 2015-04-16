@@ -80,7 +80,7 @@ class IBCC(object):
             self.uselowerbound = uselowerbound
             
         # Ensure we have float arrays so we can do division with these parameters properly
-        self.nu0 = self.nu0.astype(float)
+        self.nu0 = np.array(self.nu0).astype(float)
         if self.nu0.ndim==1:
             self.nu0 = self.nu0.reshape((self.nclasses,1))
         elif self.nu0.shape[0]!=self.nclasses and self.nu0.shape[1]==self.nclasses:
@@ -360,11 +360,12 @@ class IBCC(object):
     def post_Alpha(self):  # Posterior Hyperparams
         # Save the counts from the training data so we only recalculate the test data on every iteration
         if self.alpha_tr == []:
-            self.alpha_tr = self.alpha.copy()
-            for j in range(self.nclasses):
-                for l in range(self.nscores):
-                    Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
-                    self.alpha_tr[j,l,:] = self.C[l][self.trainidxs,:].T.dot(Tj).reshape(-1)
+            self.alpha_tr = np.zeros(self.alpha.shape)
+            if self.Ntrain:
+                for j in range(self.nclasses):
+                    for l in range(self.nscores):
+                        Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
+                        self.alpha_tr[j,l,:] = self.C[l][self.trainidxs,:].T.dot(Tj).reshape(-1)
             self.alpha_tr += self.alpha0
         # Add the counts from the test data
         for j in range(self.nclasses):

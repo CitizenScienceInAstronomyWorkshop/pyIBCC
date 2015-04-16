@@ -24,9 +24,6 @@ class DynIBCC(ibcc.IBCC):
     tauidxs_test = [] # the time-step indexes of the test data points
     alpha0_tau = [] # the hyper-parameters copied out for each time-step. alpha0 has only one matrix for each agent. 
 # Initialisation ---------------------------------------------------------------------------------------------------
-    def __init__(self, nclasses=2, nscores=2, alpha0=None, nu0=None, K=1, dh=None):
-        super(DynIBCC, self).__init__(nclasses, nscores, alpha0, nu0, K, dh)
-        
     def init_lnPi(self):
         '''
         Always creates new self.alpha and self.lnPi objects and calculates self.alpha and self.lnPi values according to 
