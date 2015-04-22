@@ -181,7 +181,7 @@ class IBCC(object):
         else:
             crowdobjects = crowdlabels[:,1].astype(int)
             self.observed_idxs, mappedidxs = np.unique(crowdobjects, return_inverse=True)
-            self.full_N = np.max(crowdlabels[:,1])
+            self.full_N = np.max(crowdlabels[:,1]) + 1 # have to add one since indexes start from 0  
             if self.full_N > len(self.observed_idxs):
                 self.sparse = True
                 # map the IDs so we skip unobserved data points. We'll map back at the end of the classification procedure.
