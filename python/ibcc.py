@@ -161,7 +161,7 @@ class IBCC(object):
             partly_j_idxs = uncert_trainidxs[partly_j_idxs]
             self.E_t[partly_j_idxs, j] = self.goldlabels[partly_j_idxs] - j + 1
         if self.sparse:
-            self.E_t_sparse = self.E_t  # current working version is sparse            
+            self.E_t_sparse = self.E_t # current working version is a sparse set of observations of the complete space of data points            
 
 # Data preprocessing and helper functions --------------------------------------------------------------------------
     def desparsify_crowdlabels(self, crowdlabels):
@@ -221,7 +221,7 @@ class IBCC(object):
         # record the test and train idxs
         self.trainidxs = self.goldlabels > -1
         self.Ntrain = np.sum(self.trainidxs)
-        
+        # self.testidxs only includes points with crowd labels!
         if testidxs != None:  # include the pre-specified set of unlabelled data points in the inference process. All
             # other data points are either training data or ignored.
             self.testidxs = testidxs[self.observed_idxs]
