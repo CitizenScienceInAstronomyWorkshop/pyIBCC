@@ -327,7 +327,7 @@ class IBCC(object):
         Variational approximate inference. Assumes that all data and hyper-parameters are ready for use. Overwrite
         do implement EP or Gibbs' sampling etc.
         '''
-        logging.info('IBCC: combining to predict ' + str(np.sum(self.testidxs)) + " test data points...")
+        logging.info('IBCC: combining %i training points + %i noisy-labelled points' % (np.sum(self.trainidxs), np.sum(self.testidxs)))
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
