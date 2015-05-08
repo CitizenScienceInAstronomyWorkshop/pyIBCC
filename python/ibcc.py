@@ -537,10 +537,9 @@ class IBCC(object):
         #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
         
         opt_hyperparams = self.set_hyperparams(opt_hyperparams)
-        logging.debug("Hyperparameters optimised using ML or MAP estimation: ")
+        logging.debug("Optimal hyper-parameters: ")
         for param in opt_hyperparams:
             logging.debug(str(param))
-        logging.debug("Optimal hyperparams: %s" % str(opt_hyperparams))
         
         return self.E_t
     
