@@ -464,13 +464,18 @@ class IBCC(object):
         # logging.debug('EEnergy ' + str(EEnergy) + ', H ' + str(H))
         return L
 # Hyperparameter Optimisation ------------------------------------------------------------------------------------------
-    def unflatten_hyperparams(self,hyperparams):
+    def set_hyperparams(self,hyperparams):
         initialK = (len(hyperparams) - self.nclasses) / (self.nclasses * self.nscores)
         alpha_shape = (self.nclasses, self.nscores, initialK)
         n_alpha_elements = np.prod(alpha_shape)        
         alpha0 = hyperparams[0:n_alpha_elements].reshape(alpha_shape)
         nu0 = hyperparams[-self.nclasses:]
-        return alpha0,nu0
+        self.alpha0 = alpha0 
+        self.nu0 = nu0
+        return (alpha0, nu0)
+
+    def get_hyperparams(self):
+        return np.concatenate((self.alpha0.flatten(), self.nu0.flatten()))
     
     def post_lnjoint_ct(self):
         # If we have not already calculated lnpCT for the lower bound, then make sure we recalculate using all data
@@ -503,7 +508,7 @@ class IBCC(object):
             logging.debug("Hyper-parameters: %s" % str(hyperparams))
         if np.any(np.isnan(hyperparams)) or np.any(hyperparams <= 0):
             return np.inf
-        self.alpha0, self.nu0 = self.unflatten_hyperparams(hyperparams)
+        self.set_hyperparams(hyperparams)
         
         #ensure new alpha0 and nu0 values are used when updating E_t
         self.init_params(force_reset=True)
@@ -516,21 +521,21 @@ class IBCC(object):
         lml = data_loglikelihood + log_model_prior
         logging.debug("Log joint probability of the model & data: %f" % lml)
         return -lml #returns Negative!
- 
+    
     def optimize_hyperparams(self, maxiter=200):
         ''' 
         Assuming gamma distributions over the hyper-parameters, we find the MAP values. The combiner object is updated
         to contain the optimal values, searched for using BFGS.
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
-        initialguess = np.concatenate((self.alpha0.flatten(), self.nu0.flatten()))
+        initialguess = self.get_hyperparams()
         opt_hyperparams,_,niterations,_,_ = fmin(self.neg_marginal_likelihood, initialguess, maxiter=maxiter, full_output=True)
         #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
         
-        self.alpha0, self.nu0 = self.unflatten_hyperparams(opt_hyperparams)
-        logging.info("Hyperparameters optimised using ML or MAP estimation: ")
-        logging.info("alpha0: " + str(self.alpha0))
-        logging.info("nu0: " + str(self.nu0))        
+        opt_hyperparams = self.set_hyperparams(opt_hyperparams)
+        logging.debug("Hyperparameters optimised using ML or MAP estimation: ")
+        for param in opt_hyperparams:
+            logging.debug(str(param))
         self.noptiter = niterations 
         logging.debug("Optimal hyperparams: %s" % str(opt_hyperparams))
         
@@ -563,7 +568,7 @@ def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
     
 if __name__ == '__main__':
     
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     
     if len(sys.argv)>1:
         configFile = sys.argv[1]
