@@ -7,15 +7,14 @@ from copy import deepcopy
 from scipy.sparse import coo_matrix, csr_matrix
 from scipy.special import psi, gammaln
 from ibccdata import DataHandler
-from scipy.optimize import fmin
+from scipy.optimize import fmin, fmin_cobyla
 from scipy.stats import gamma
 
 class IBCC(object):
 # Print extra debug info
     verbose = True
     keeprunning = True # set to false causes the combine_classifications method to exit without completing if another 
-    # thread is checking whether IBCC is taking too long. Probably won't work well if the optimize_hyperparams is true.
-    noptiter = 0 # Number of optimisation iterations used to find the current hyper-parameters.    
+    # thread is checking whether IBCC is taking too long. Probably won't work well if the optimize_hyperparams is true.    
 # Configuration for variational Bayes (VB) algorithm for approximate inference -------------------------------------
     # determine convergence by calculating lower bound? Quicker to set=False so we check convergence of target variables
     uselowerbound = False
@@ -471,13 +470,15 @@ class IBCC(object):
         alpha_shape = (self.nclasses, self.nscores, initialK)
         n_alpha_elements = np.prod(alpha_shape)        
         alpha0 = hyperparams[0:n_alpha_elements].reshape(alpha_shape)
-        nu0 = hyperparams[-self.nclasses:]
+        nu0 = np.array(hyperparams[-self.nclasses:]).reshape(self.nclasses, 1)
         self.alpha0 = alpha0 
         self.nu0 = nu0
         return (alpha0, nu0)
 
     def get_hyperparams(self):
-        return np.concatenate((self.alpha0.flatten(), self.nu0.flatten()))
+        constraints = []
+        constraints.append(lambda hp: np.all(hp[0:self.nclasses*self.nscores + self.nclasses]))
+        return np.concatenate((self.alpha0.flatten(), self.nu0.flatten())), constraints
     
     def post_lnjoint_ct(self):
         # If we have not already calculated lnpCT for the lower bound, then make sure we recalculate using all data
@@ -530,15 +531,15 @@ class IBCC(object):
         to contain the optimal values, searched for using BFGS.
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
-        initialguess = self.get_hyperparams()
-        opt_hyperparams,_,niterations,_,_ = fmin(self.neg_marginal_likelihood, initialguess, maxiter=maxiter, full_output=True)
+        initialguess, constraints = self.get_hyperparams()
+        opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints)
+#         opt_hyperparams,_,niterations,_,_ = fmin(self.neg_marginal_likelihood, initialguess, maxiter=maxiter, full_output=True)
         #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
         
         opt_hyperparams = self.set_hyperparams(opt_hyperparams)
         logging.debug("Hyperparameters optimised using ML or MAP estimation: ")
         for param in opt_hyperparams:
             logging.debug(str(param))
-        self.noptiter = niterations 
         logging.debug("Optimal hyperparams: %s" % str(opt_hyperparams))
         
         return self.E_t
@@ -564,7 +565,7 @@ def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
         dh.save_targets(pT)
 
     dh.save_pi(combiner.alpha, combiner.nclasses, combiner.nscores)
-    dh.save_hyperparams(combiner.alpha, combiner.nu, combiner.noptiter)
+    dh.save_hyperparams(combiner.alpha, combiner.nu)
     pT = dh.map_predictions_to_original_IDs(pT)
     return pT, combiner
     

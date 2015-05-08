@@ -289,7 +289,7 @@ class DataHandler(object):
         flatPi = flatPi.reshape(alpha.shape[2], nclasses*nscores)
         np.savetxt(self.confmat_file, flatPi, fmt='%1.3f')
         
-    def save_hyperparams(self, alpha, nu, niterations):    
+    def save_hyperparams(self, alpha, nu):    
         if self.hyperparam_file is None or self.hyperparam_file=='':
             return
         
@@ -303,7 +303,6 @@ class DataHandler(object):
         
         nu = nu.flatten()
         others = []
-        others.append(niterations)
         for nuj in nu:
             others.append(nuj)
         np.savetxt(self.hyperparam_file+"_others.csv", others, fmt='%1.3f')
