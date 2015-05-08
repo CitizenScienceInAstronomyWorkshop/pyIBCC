@@ -101,9 +101,7 @@ class Evaluator(object):
                         
             diffs = tpr-FPR
             best = np.argmax(diffs)
-            print  'The best threshold is ' + str(thresholds[best]) + ' at diff of ' + str(np.max(diffs))       
-            print 'tpr: ' + str(tpr[best])
-            print 'FPR: ' + str(FPR[best])
+            print  'The best threshold is %.3f at diff of %.3f, with TPR=%.3f and FPR=%.3f' % (thresholds[best], np.max(diffs), tpr[best], FPR[best])
                         
         if self.nclasses==2:
             auc_result = auc_result[0]
@@ -116,22 +114,27 @@ class Evaluator(object):
             testresults = self.pT[self.testIdxs,:]
         elif testresults.ndim==1 and labels.ndim != 1:
             testresults = testresults.reshape(testresults.size,1)
-            testresults = np.concatenate((testresults,1-testresults), axis=1)             
+            testresults = np.concatenate((testresults,1-testresults), axis=1)
+        elif testresults.ndim==1 and labels.ndim == 1:
+            testresults = testresults.copy() # need to copy as we will alter the data in the object
+                                 
         if labels==[]:
             labels = self.dh.goldlabels[self.testIdxs].reshape(-1)
         if labels.ndim==1 and testresults.ndim!=1:
             labels = labels.reshape(labels.size,1)
             labels = np.concatenate((labels,1-labels), axis=1)
+
+        zeroidxs = testresults==0
+        testresults[zeroidxs] = 0.0000001        
             
         if labels.ndim==1 and testresults.ndim==1:
             negidxs = labels==0
             testresults[negidxs] = 1-testresults[negidxs]
-        
-        zeroidxs = testresults==0
-        testresults[zeroidxs] = 0.0000001
-        crossentropy = -np.log(testresults[labels==1])        
-        print "number of cross entropy points: " + str(crossentropy.size)
-        crossentropy = np.sum(crossentropy)/labels.shape[0]
+            crossentropy = -np.log(testresults)
+        else:
+            crossentropy = -np.log(testresults*labels)        
+        #print "number of cross entropy points: " + str(crossentropy.size)
+        crossentropy = np.sum(crossentropy)/float(labels.shape[0])
         return crossentropy    
     
     def eval_results(self):

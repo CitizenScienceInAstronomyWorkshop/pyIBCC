@@ -228,7 +228,8 @@ class IBCC(object):
         else:  # If the test indexes are not specified explicitly, assume that all data points with a NaN or a -1 in the
             # training data must be test indexes.
             self.testidxs = np.bitwise_or(np.isnan(self.goldlabels), self.goldlabels < 0)
-        self.Ntest = np.sum(self.testidxs)            
+        self.testidxs = self.testidxs>0            
+        self.Ntest = np.sum(self.testidxs)      
             
     def preprocess_crowdlabels(self, crowdlabels):
         # Initialise all objects relating to the crowd labels.
@@ -327,7 +328,8 @@ class IBCC(object):
         Variational approximate inference. Assumes that all data and hyper-parameters are ready for use. Overwrite
         do implement EP or Gibbs' sampling etc.
         '''
-        logging.info('IBCC: combining %i training points + %i noisy-labelled points' % (np.sum(self.trainidxs), np.sum(self.testidxs)))
+        logging.info('IBCC: combining %i training points + %i noisy-labelled points' % (np.sum(self.trainidxs), 
+                                                                                        np.sum(self.testidxs)))
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
