@@ -12,7 +12,7 @@ from scipy.stats import gamma
 
 class IBCC(object):
 # Print extra debug info
-    verbose = True
+    verbose = False
     keeprunning = True # set to false causes the combine_classifications method to exit without completing if another 
     # thread is checking whether IBCC is taking too long. Probably won't work well if the optimize_hyperparams is true.    
 # Configuration for variational Bayes (VB) algorithm for approximate inference -------------------------------------
@@ -49,6 +49,10 @@ class IBCC(object):
 # Model parameters and hyper-parameters -----------------------------------------------------------------------------
     #The model
     alpha0 = None
+    clusteridxs_alpha0 = [] # use this if you want to use an alpha0 where each matrix is a prior for a group of agents. This
+    # is and array of indicies that indicates which of the original alpha0 groups should be used for each agent.
+    alpha0_length = 1 # can be either 1, K or nclusters
+    alpha0_cluster = [] # copy of the alpha0 values for each cluster.
     nu0 = None    
     lnkappa = []
     nu = []
@@ -112,15 +116,22 @@ class IBCC(object):
         self.alpha0 = self.alpha0.astype(float)
         # if we specify different alpha0 for some agents, we need to do so for all K agents. The last agent passed in 
         # will be duplicated for any missing agents.
-        if len(self.alpha0.shape) == 3 and self.alpha0.shape[2] < self.K:
+        if self.clusteridxs_alpha0 != []: # map from a list of cluster IDs
+            if self.alpha0_cluster == []:
+                self.alpha0_cluster = self.alpha0
+                self.alpha0_length = self.alpha0_cluster.shape[2]
+            self.alpha0 = self.alpha0_cluster[:, :, self.clusteridxs_alpha0]        
+        elif len(self.alpha0.shape) == 3 and self.alpha0.shape[2] < self.K:
             # We have a new dataset with more agents than before -- create more priors.
             nnew = self.K - self.alpha0.shape[2]
             alpha0new = self.alpha0[:, :, 0]
             alpha0new = alpha0new[:, :, np.newaxis]
             alpha0new = np.repeat(alpha0new, nnew, axis=2)
             self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
+            self.alpha0_length = self.K
         elif len(self.alpha0.shape)==2:
             self.alpha0  = self.alpha0[:,:,np.newaxis]
+            self.alpha0_length = 1
         # Make sure self.alpha is the right size as well. Values of self.alpha not important as we recalculate below
         self.alpha = np.zeros((self.nclasses, self.nscores, self.K), dtype=np.float) + self.alpha0
         self.lnPi = np.zeros((self.nclasses, self.nscores, self.K))        
@@ -297,7 +308,8 @@ class IBCC(object):
         self.E_t = E_t_full        
         
 # Run the inference algorithm --------------------------------------------------------------------------------------    
-    def combine_classifications(self, crowdlabels, goldlabels=None, testidxs=None, optimise_hyperparams=False, table_format=False):
+    def combine_classifications(self, crowdlabels, goldlabels=None, testidxs=None, optimise_hyperparams=False, maxiter=200, 
+                                table_format=False):
         '''
         Takes crowdlabels in either sparse list or table formats, along with optional training labels (goldlabels)
         and applies data-preprocessing steps before running inference for the model parameters and target labels.
@@ -315,7 +327,7 @@ class IBCC(object):
             self.init_params()
         # Either run the model optimisation or just use the inference method with fixed hyper-parameters  
         if optimise_hyperparams:
-            self.optimize_hyperparams()
+            self.optimize_hyperparams(maxiter=maxiter)
         else:
             self.run_inference() 
         if self.sparse:
@@ -466,19 +478,25 @@ class IBCC(object):
         return L
 # Hyperparameter Optimisation ------------------------------------------------------------------------------------------
     def set_hyperparams(self,hyperparams):
-        initialK = (len(hyperparams) - self.nclasses) / (self.nclasses * self.nscores)
-        alpha_shape = (self.nclasses, self.nscores, initialK)
-        n_alpha_elements = np.prod(alpha_shape)        
+        n_alpha_elements = len(hyperparams) - self.nclasses
+        alpha_shape = (self.nclasses, self.nscores, self.alpha0_length)
         alpha0 = hyperparams[0:n_alpha_elements].reshape(alpha_shape)
         nu0 = np.array(hyperparams[-self.nclasses:]).reshape(self.nclasses, 1)
-        self.alpha0 = alpha0 
+        if self.clusteridxs_alpha0 != []:
+            self.alpha0_cluster = alpha0
+        else:
+            self.alpha0 = alpha0  
         self.nu0 = nu0
         return (alpha0, nu0)
 
     def get_hyperparams(self):
         constraints = []
-        constraints.append(lambda hp: np.all(hp[0:self.nclasses*self.nscores + self.nclasses]))
-        return np.concatenate((self.alpha0.flatten(), self.nu0.flatten())), constraints
+        constraints.append(lambda hp: np.all(hp[0:self.alpha0_length*self.nclasses*self.nscores + self.nclasses]))
+        if self.clusteridxs_alpha0 != []:
+            alpha0 = self.alpha0_cluster
+        else:
+            alpha0 = self.alpha0
+        return np.concatenate((alpha0.flatten(), self.nu0.flatten())), constraints
     
     def post_lnjoint_ct(self):
         # If we have not already calculated lnpCT for the lower bound, then make sure we recalculate using all data
@@ -532,7 +550,7 @@ class IBCC(object):
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
         initialguess, constraints = self.get_hyperparams()
-        opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints)
+        opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints, maxfun=maxiter)
 #         opt_hyperparams,_,niterations,_,_ = fmin(self.neg_marginal_likelihood, initialguess, maxiter=maxiter, full_output=True)
         #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
         
