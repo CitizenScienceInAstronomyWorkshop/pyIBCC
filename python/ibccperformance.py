@@ -27,7 +27,7 @@ class Evaluator(object):
     
     outputdir = "./output/plots/"
     
-    combiner = None
+    heatmapcombiner = None
     pT = []
     
     dh = None #data handler for IBCC
@@ -123,17 +123,16 @@ class Evaluator(object):
         if labels.ndim==1 and testresults.ndim!=1:
             labels = labels.reshape(labels.size,1)
             labels = np.concatenate((labels,1-labels), axis=1)
-
-        zeroidxs = testresults==0
-        testresults[zeroidxs] = 0.0000001        
             
         if labels.ndim==1 and testresults.ndim==1:
             negidxs = labels==0
             testresults[negidxs] = 1-testresults[negidxs]
-            crossentropy = -np.log(testresults)
         else:
-            crossentropy = -np.log(testresults*labels)        
+            testresults = testresults*labels
         #print "number of cross entropy points: " + str(crossentropy.size)
+        zeroidxs = testresults <= 1e-6
+        testresults[zeroidxs] = 1e-6
+        crossentropy = -np.log(testresults)
         crossentropy = np.sum(crossentropy)/float(labels.shape[0])
         return crossentropy    
     
@@ -372,8 +371,8 @@ class Evaluator(object):
         
         self.write_img("volunteeracc_"+self.datalabel, self.skill_fig)
         
-        #lnpi = self.combiner.lnPi
-        #lnproportions = self.combiner.lnNu.reshape((self.nclasses,0,1))
+        #lnpi = self.heatmapcombiner.lnPi
+        #lnproportions = self.heatmapcombiner.lnNu.reshape((self.nclasses,0,1))
         #pt_given_c = np.exp(lnpi[1:,0,:]+lnproportions[1:,:,:]) / np.exp(np.sum(lnpi[:,0,:]+lnproportions, axis=0))
         
     def print_mv_by_type(self):

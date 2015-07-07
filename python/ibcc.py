@@ -191,7 +191,7 @@ class IBCC(object):
         else:
             crowdobjects = crowdlabels[:,1].astype(int)
             self.observed_idxs, mappedidxs = np.unique(crowdobjects, return_inverse=True)
-            self.full_N = np.max(crowdlabels[:,1]) + 1 # have to add one since indexes start from 0  
+            self.full_N = int(np.max(crowdlabels[:,1])) + 1 # have to add one since indexes start from 0
             if self.full_N > len(self.observed_idxs):
                 self.sparse = True
                 # map the IDs so we skip unobserved data points. We'll map back at the end of the classification procedure.
@@ -264,7 +264,7 @@ class IBCC(object):
                         Cl[partly_l_idxs] = crowdlabels[partly_l_idxs] - l + 1
                 C[l] = Cl
         else:
-            self.K = np.nanmax(crowdlabels[:,0])+1 # add one because indexes start from 0
+            self.K = int(np.nanmax(crowdlabels[:,0]))+1 # add one because indexes start from 0
             for l in range(self.nscores):
                 lIdxs = np.argwhere(crowdlabels[:, 2] == l)[:,0]
                 data = np.ones((len(lIdxs), 1)).reshape(-1)
@@ -301,7 +301,7 @@ class IBCC(object):
         Puts the expectations of target values, E_t, at the points we observed crowd labels back to their original 
         indexes in the output array. Values are inserted for the unobserved indices using only kappa (class proportions).
         '''
-        E_t_full = np.zeros((self.full_N,self.nclasses))
+        E_t_full = np.zeros((self.full_N, self.nclasses))
         E_t_full[:] = (np.exp(self.lnkappa) / np.sum(np.exp(self.lnkappa),axis=0)).T
         E_t_full[self.observed_idxs,:] = self.E_t
         self.E_t_sparse = self.E_t  # save the sparse version
@@ -332,7 +332,10 @@ class IBCC(object):
             self.run_inference() 
         if self.sparse:
             self.resparsify_t()
-        return self.E_t        
+        return self.E_t      
+    
+    def convergence_measure(self, oldET):
+        return np.max(np.sum(np.absolute(oldET - self.E_t), 1))          
 
     def run_inference(self):   
         '''
@@ -359,13 +362,13 @@ class IBCC(object):
                 change = L-oldL
                 oldL = L
             else:
-                change = np.max(np.sum(np.absolute(oldET - self.E_t)))
+                change = self.convergence_measure(oldET)
             if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>self.min_iterations:
                 converged = True
             self.nIts+=1
             if change < -0.001 and self.verbose:                
                 logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
-            elif self.verbose:
+            else:#if self.verbose:
                 logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
         logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
 
@@ -490,13 +493,16 @@ class IBCC(object):
         return (alpha0, nu0)
 
     def get_hyperparams(self):
-        constraints = []
-        constraints.append(lambda hp: np.all(hp[0:self.alpha0_length*self.nclasses*self.nscores + self.nclasses]))
+        constraints = [lambda hp: 1 if np.all(np.asarray(hp[0:self.alpha0_length*self.nclasses*self.nscores + self.nclasses])>0) else -1]
         if self.clusteridxs_alpha0 != []:
             alpha0 = self.alpha0_cluster
         else:
             alpha0 = self.alpha0
-        return np.concatenate((alpha0.flatten(), self.nu0.flatten())), constraints
+
+        rhobeg = np.ones(len(hyperparams))
+        rhoend = np.ones(len(hyperparams)) * 0.2
+
+        return np.concatenate((alpha0.flatten(), self.nu0.flatten())), constraints, rhobeg, rhoend
     
     def post_lnjoint_ct(self):
         # If we have not already calculated lnpCT for the lower bound, then make sure we recalculate using all data
@@ -506,7 +512,7 @@ class IBCC(object):
                 
     def ln_modelprior(self):
         #Check and initialise the hyper-hyper-parameters if necessary
-        if self.gam_scale_alpha==[]:
+        if self.gam_scale_alpha==[] or (len(self.gam_scale_alpha.shape) == 3 and self.gam_scale_alpha.shape[2]!=self.alpha0.shape[2]):
             self.gam_shape_alpha = np.float(self.gam_shape_alpha)
             # if the scale was not set, assume current values of alpha0 are the means given by the hyper-prior
             self.gam_scale_alpha = self.alpha0/self.gam_shape_alpha
@@ -516,8 +522,8 @@ class IBCC(object):
             self.gam_scale_nu = self.nu0/self.gam_shape_nu
         
         #Gamma distribution over each value. Set the parameters of the gammas.
-        p_alpha0 = gamma.logpdf(self.alpha0, self.gam_shape_alpha, scale=self.gam_scale_alpha)
-        p_nu0 = gamma.logpdf(self.nu0, self.gam_shape_nu, scale=self.gam_scale_nu)
+        p_alpha0 = gamma.logpdf(self.alpha0, a=self.gam_shape_alpha, scale=self.gam_scale_alpha)
+        p_nu0 = gamma.logpdf(self.nu0, a=self.gam_shape_nu, scale=self.gam_scale_nu)
         
         return np.sum(p_alpha0) + np.sum(p_nu0)
 
@@ -545,15 +551,15 @@ class IBCC(object):
     
     def optimize_hyperparams(self, maxiter=200):
         ''' 
-        Assuming gamma distributions over the hyper-parameters, we find the MAP values. The combiner object is updated
+        Assuming gamma distributions over the hyper-parameters, we find the MAP values. The heatmapcombiner object is updated
         to contain the optimal values, searched for using BFGS.
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
-        initialguess, constraints = self.get_hyperparams()
-        opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints, maxfun=maxiter)
-#         opt_hyperparams,_,niterations,_,_ = fmin(self.neg_marginal_likelihood, initialguess, maxiter=maxiter, full_output=True)
-        #also try fmin_cq(func=combfunc, x0=initialguess, maxiter=10000, fprime=???)
-        
+        initialguess, constraints, rhobeg, rhoend = self.get_hyperparams()
+        #opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints, maxfun=maxiter, rhobeg=rhobeg, rhoend=rhoend)
+        opt_hyperparams, _, niterations, _, _ = fmin(self.neg_marginal_likelihood, initialguess, maxfun=maxiter,
+                                                     full_output=True, xtol=rhoend, ftol=0.5)
+
         opt_hyperparams = self.set_hyperparams(opt_hyperparams)
         logging.debug("Optimal hyper-parameters: ")
         for param in opt_hyperparams:
@@ -566,25 +572,25 @@ def load_combiner(config_file, ibcc_class=None):
     dh = DataHandler()
     dh.loadData(config_file)
     if ibcc_class==None:
-        combiner = IBCC(dh=dh)
+        heatmapcombiner = IBCC(dh=dh)
     else:
-        combiner = ibcc_class(dh=dh)
-    return combiner, dh
+        heatmapcombiner = ibcc_class(dh=dh)
+    return heatmapcombiner, dh
 
 def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
-    combiner, dh = load_combiner(configFile, ibcc_class)
+    heatmapcombiner, dh = load_combiner(configFile, ibcc_class)
     #combine labels
-    combiner.verbose = True
-    pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
+    heatmapcombiner.verbose = True
+    pT = heatmapcombiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
                                           table_format=dh.table_format)
 
-    if dh.output_file != None:
+    if dh.output_file is not None:
         dh.save_targets(pT)
 
-    dh.save_pi(combiner.alpha, combiner.nclasses, combiner.nscores)
-    dh.save_hyperparams(combiner.alpha, combiner.nu)
+    dh.save_pi(heatmapcombiner.alpha, heatmapcombiner.nclasses, heatmapcombiner.nscores)
+    dh.save_hyperparams(heatmapcombiner.alpha, heatmapcombiner.nu)
     pT = dh.map_predictions_to_original_IDs(pT)
-    return pT, combiner
+    return pT, heatmapcombiner
     
 if __name__ == '__main__':
     
