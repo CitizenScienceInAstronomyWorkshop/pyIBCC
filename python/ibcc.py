@@ -558,7 +558,7 @@ class IBCC(object):
         initialguess, constraints, rhobeg, rhoend = self.get_hyperparams()
         #opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints, maxfun=maxiter, rhobeg=rhobeg, rhoend=rhoend)
         opt_hyperparams, _, niterations, _, _ = fmin(self.neg_marginal_likelihood, initialguess, maxfun=maxiter,
-                                                     full_output=True, xtol=rhoend, ftol=0.5)
+                                                     full_output=True, ftol=1, xtol=rhoend)
 
         opt_hyperparams = self.set_hyperparams(opt_hyperparams)
         logging.debug("Optimal hyper-parameters: ")
