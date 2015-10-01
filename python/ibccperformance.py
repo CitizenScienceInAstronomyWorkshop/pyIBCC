@@ -91,6 +91,8 @@ class Evaluator(object):
         
         auc_result = np.zeros(self.nclasses-1)
         ap = np.zeros(self.nclasses-1)
+        best_thresholds = np.zeros(self.nclasses-1)
+        
         for j in range(self.nclasses-1):
             y_true = labelmatrix[:,j]
             y_scores = testresults[:,j]
@@ -101,13 +103,14 @@ class Evaluator(object):
                         
             diffs = tpr-FPR
             best = np.argmax(diffs)
-            print  'The best threshold is %.3f at diff of %.3f, with TPR=%.3f and FPR=%.3f' % (thresholds[best], np.max(diffs), tpr[best], FPR[best])
+            #print  'The best threshold is %.3f at diff of %.3f, with TPR=%.3f and FPR=%.3f' % (thresholds[best], np.max(diffs), tpr[best], FPR[best])
+            best_thresholds[j] = thresholds[best]
                         
         if self.nclasses==2:
             auc_result = auc_result[0]
             ap = ap[0]
                         
-        return auc_result, ap
+        return auc_result, ap, best_thresholds
     
     def eval_crossentropy(self, testresults=[], labels=[]):
         if testresults==[]:
