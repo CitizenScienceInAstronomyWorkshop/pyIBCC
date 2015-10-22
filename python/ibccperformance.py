@@ -98,7 +98,11 @@ class Evaluator(object):
             y_scores = testresults[:,j]
             #auc[j] = roc_auc_score(y_true, y_scores) #need scikit 0.14. 
             FPR, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=1)
-            auc_result[j] = auc(FPR, tpr)
+            if np.sum(y_true==0)==0 or np.sum(y_true==1)==0:
+                auc_result[j] = 0.5 
+                logging.warning("Cannot compute a meaningful AUC as dataset has no examples of one class.")
+            else:
+                auc_result[j] = auc(FPR, tpr)
             ap[j] = average_precision_score(y_true, y_scores)
                         
             diffs = tpr-FPR

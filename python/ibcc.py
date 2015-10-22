@@ -344,7 +344,10 @@ class IBCC(object):
         return self.E_t      
     
     def convergence_measure(self, oldET):
-        return np.max(np.sum(np.absolute(oldET - self.E_t), 1))          
+        return np.max(np.abs(oldET - self.E_t))          
+
+    def convergence_check(self):
+        return (self.nIts>=self.max_iterations or self.change<self.conv_threshold) and self.nIts>self.min_iterations        
 
     def run_inference(self):   
         '''
@@ -368,18 +371,18 @@ class IBCC(object):
                 L = self.lowerbound()
                 if self.verbose:
                     logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L - oldL))
-                change = L-oldL
+                self.change = L-oldL
                 oldL = L
             else:
-                change = self.convergence_measure(oldET)
-            if (self.nIts>=self.max_iterations or change<self.conv_threshold) and self.nIts>self.min_iterations:
+                self.change = self.convergence_measure(oldET)
+            if self.convergence_check():
                 converged = True
             self.nIts+=1
-            if change < -0.001 and self.verbose:                
-                logging.warning('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change) + '. Possible bug or rounding error?')            
+            if self.change < -0.001 and self.verbose:                
+                logging.warning('IBCC iteration %i absolute change was %s. Possible bug or rounding error?' % (self.nIts, self.change))            
             elif self.verbose:
-                logging.debug('IBCC iteration ' + str(self.nIts) + ' absolute change was ' + str(change))
-        logging.info('IBCC finished in ' + str(self.nIts) + ' iterations (max iterations allowed = ' + str(self.max_iterations) + ').')
+                logging.debug('IBCC iteration %i absolute change was %s' % (self.nIts, self.change))
+        logging.info('IBCC finished in %i iterations (max iterations allowed = %i).' % (self.nIts, self.max_iterations))
 
 # Posterior Updates to Hyperparameters --------------------------------------------------------------------------------
     def post_Alpha(self):  # Posterior Hyperparams
@@ -488,7 +491,8 @@ class IBCC(object):
         
         # Lower Bound
         L = EEnergy - H
-        logging.debug('EEnergy %.3f, H %.3f, lnpCT %.3f, lnqT %.3f, lnpKappa %.3f, lnqKappa %.3f, lnpPi %.3f, lnqPi %.3f' % \
+        if self.verbose:
+            logging.debug('EEnergy %.3f, H %.3f, lnpCT %.3f, lnqT %.3f, lnpKappa %.3f, lnqKappa %.3f, lnpPi %.3f, lnqPi %.3f' % \
                       (EEnergy, H, lnpCT, lnqT, lnpKappa, lnqKappa, lnpPi, lnqPi))
         return L
 # Hyperparameter Optimisation ------------------------------------------------------------------------------------------
@@ -582,9 +586,13 @@ class IBCC(object):
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
         initialguess = self.get_hyperparams()
+        initial_nlml = self.neg_marginal_likelihood(initialguess, use_MAP)
+        ftol = initial_nlml / 100.0
+        self.conv_threshold = ftol / 10.0
+        
         #opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints, maxfun=maxiter, rhobeg=rhobeg, rhoend=rhoend)
         opt_hyperparams, _, _, _, _ = fmin(self.neg_marginal_likelihood, initialguess, args=(use_MAP,), maxfun=maxiter,
-                                                     full_output=True, ftol=1, xtol=1e100)
+                                                     full_output=True, ftol=ftol, xtol=1e100)
 
         opt_hyperparams = self.set_hyperparams(opt_hyperparams)
         logging.debug("Optimal hyper-parameters: ")
