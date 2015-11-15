@@ -20,7 +20,7 @@ class IBCC(object):
     uselowerbound = False
     min_iterations = 1
     max_iterations = 500
-    conv_threshold = 0.0001
+    conv_threshold = 1e-6
 # Data set attributes -----------------------------------------------------------------------------------------------
     discretedecisions = False  # If true, decisions are rounded to discrete integers. If false, you can submit undecided
     # responses as fractions between two classes. E.g. 2.3 means that 0.3 of the decision will go to class 3, and 0.7
@@ -271,7 +271,8 @@ class IBCC(object):
                         Cl[partly_l_idxs] = crowdlabels[partly_l_idxs] - l + 1
                 C[l] = Cl
         else:
-            self.K = int(np.nanmax(crowdlabels[:,0]))+1 # add one because indexes start from 0
+            if self.K < int(np.nanmax(crowdlabels[:,0]))+1:
+                self.K = int(np.nanmax(crowdlabels[:,0]))+1 # add one because indexes start from 0
             for l in range(self.nscores):
                 lIdxs = np.argwhere(crowdlabels[:, 2] == l)[:,0]
                 data = np.ones((len(lIdxs), 1)).reshape(-1)
@@ -344,7 +345,7 @@ class IBCC(object):
         return self.E_t      
     
     def convergence_measure(self, oldET):
-        return np.max(np.abs(oldET - self.E_t))          
+        return np.max(np.abs(oldET - self.E_t))
 
     def convergence_check(self):
         return (self.nIts>=self.max_iterations or self.change<self.conv_threshold) and self.nIts>self.min_iterations        
