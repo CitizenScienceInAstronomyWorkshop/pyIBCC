@@ -596,9 +596,10 @@ class IBCC(object):
                                                      full_output=True, ftol=ftol, xtol=1e100)
 
         opt_hyperparams = self.set_hyperparams(opt_hyperparams)
-        logging.debug("Optimal hyper-parameters: ")
+        msg = "Optimal hyper-parameters: "
         for param in opt_hyperparams:
-            logging.debug(str(param))
+            msg += str(param)
+        logging.debug(msg)
         
         return self.E_t
     
