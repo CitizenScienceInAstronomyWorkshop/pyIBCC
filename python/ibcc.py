@@ -20,7 +20,9 @@ class IBCC(object):
     uselowerbound = False
     min_iterations = 1
     max_iterations = 500
-    conv_threshold = 1e-6
+    conv_threshold = 1e-5
+    conv_check_freq = 2
+    
 # Data set attributes -----------------------------------------------------------------------------------------------
     discretedecisions = False  # If true, decisions are rounded to discrete integers. If false, you can submit undecided
     # responses as fractions between two classes. E.g. 2.3 means that 0.3 of the decision will go to class 3, and 0.7
@@ -45,11 +47,12 @@ class IBCC(object):
     testidxs = None
     conf_mat_ind = []  # indices into the confusion matrices corresponding to the current set of crowd labels
     # the joint likelihood (interim value saved to reduce computation)
-    lnpCT = None  
+    lnpCT = None
+      
 # Model parameters and hyper-parameters -----------------------------------------------------------------------------
     #The model
     alpha0 = None
-    clusteridxs_alpha0 = [] # use this if you want to use an alpha0 where each matrix is a prior for a group of agents. This
+    clusteridxs_alpha0 = [] # use this if you want to use an alpha0 where each matrix is diags prior for diags group of agents. This
     # is and array of indicies that indicates which of the original alpha0 groups should be used for each agent.
     alpha0_length = 1 # can be either 1, K or nclusters
     alpha0_cluster = [] # copy of the alpha0 values for each cluster.
@@ -124,8 +127,8 @@ class IBCC(object):
         self.alpha0 = self.alpha0.astype(float)
         # if we specify different alpha0 for some agents, we need to do so for all K agents. The last agent passed in 
         # will be duplicated for any missing agents.
-        if self.clusteridxs_alpha0 != []: # map from a list of cluster IDs
-            if self.alpha0_cluster == []:
+        if np.any(self.clusteridxs_alpha0): # map from diags list of cluster IDs
+            if not np.any(self.alpha0_cluster):
                 self.alpha0_cluster = self.alpha0
                 self.alpha0_length = self.alpha0_cluster.shape[2]
             self.alpha0 = self.alpha0_cluster[:, :, self.clusteridxs_alpha0]        
@@ -139,9 +142,10 @@ class IBCC(object):
         elif len(self.alpha0.shape)==2:
             self.alpha0  = self.alpha0[:,:,np.newaxis]
         # Make sure self.alpha is the right size as well. Values of self.alpha not important as we recalculate below
+        self.alpha0 = self.alpha0[:, :, :self.K] # make this the right size if there are fewer classifiers than expected
         self.alpha = np.zeros((self.nclasses, self.nscores, self.K), dtype=np.float) + self.alpha0
         self.lnPi = np.zeros((self.nclasses, self.nscores, self.K))        
-        self.expec_lnPi()
+        self.expec_lnPi(posterior=False) # calculate alpha from the initial/prior values only in the first iteration
 
     def init_t(self):
         kappa = (self.nu0 / np.sum(self.nu0, axis=0)).T
@@ -183,7 +187,7 @@ class IBCC(object):
 # Data preprocessing and helper functions --------------------------------------------------------------------------
     def desparsify_crowdlabels(self, crowdlabels):
         '''
-        Converts the IDs of data points in the crowdlabels to a set of consecutive integer indexes. If a data point has
+        Converts the IDs of data points in the crowdlabels to a set of consecutive integer indexes. If diags data point has
         no crowdlabels when using table format, it will be skipped.   
         '''
         if self.table_format_flag:
@@ -254,7 +258,7 @@ class IBCC(object):
         crowdlabels[np.isnan(crowdlabels)] = -1
         if self.discretedecisions:
             crowdlabels = np.round(crowdlabels).astype(int)
-        if self.table_format_flag:# crowd labels as a full KxN table? If false, use a sparse 3-column list, where 1st
+        if self.table_format_flag:# crowd labels as a full KxN table? If false, use diags sparse 3-column list, where 1st
             # column=classifier ID, 2nd column = obj ID, 3rd column = score.
             self.K = crowdlabels.shape[1]
             for l in range(self.nscores):
@@ -367,22 +371,26 @@ class IBCC(object):
             #update params
             self.expec_lnkappa()
             self.expec_lnPi()
-            #check convergence        
-            if self.uselowerbound:
-                L = self.lowerbound()
-                if self.verbose:
-                    logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L - oldL))
-                self.change = L-oldL
-                oldL = L
-            else:
-                self.change = self.convergence_measure(oldET)
-            if self.convergence_check():
-                converged = True
+            #check convergence every x iterations
+            if np.mod(self.nIts, self.conv_check_freq) == self.conv_check_freq - 1:
+                if self.uselowerbound:
+                    L = self.lowerbound()
+                    if self.verbose:
+                        logging.debug('Lower bound: ' + str(L) + ', increased by ' + str(L - oldL))
+                    self.change = (L - oldL) / np.abs(L)
+                    oldL = L
+                    if self.change < - self.conv_threshold * np.abs(L) and self.verbose:                
+                        logging.warning('IBCC iteration %i absolute change was %s. Possible bug or rounding error?' 
+                                        % (self.nIts, self.change))                    
+                else:
+                    self.change = self.convergence_measure(oldET)
+                if self.convergence_check():
+                    converged = True            
+                elif self.verbose:
+                    logging.debug('IBCC iteration %i absolute change was %s' % (self.nIts, self.change))
+                    
             self.nIts+=1
-            if self.change < -0.001 and self.verbose:                
-                logging.warning('IBCC iteration %i absolute change was %s. Possible bug or rounding error?' % (self.nIts, self.change))            
-            elif self.verbose:
-                logging.debug('IBCC iteration %i absolute change was %s' % (self.nIts, self.change))
+            
         logging.info('IBCC finished in %i iterations (max iterations allowed = %i).' % (self.nIts, self.max_iterations))
 
 # Posterior Updates to Hyperparameters --------------------------------------------------------------------------------
@@ -402,6 +410,7 @@ class IBCC(object):
                 Tj = self.E_t[self.testidxs, j].reshape((self.Ntest, 1))
                 counts = self.Ctest[l].T.dot(Tj).reshape(-1)
                 self.alpha[j, l, :] = self.alpha_tr[j, l, :] + counts
+
 # Expectations: methods for calculating expectations with respect to parameters for the VB algorithm ------------------
     def expec_lnkappa(self):
         sumET = np.sum(self.E_t, 0)
@@ -409,14 +418,14 @@ class IBCC(object):
             self.nu[j] = self.nu0[j] + sumET[j]
         self.lnkappa = psi(self.nu) - psi(np.sum(self.nu))
 
-    def expec_lnPi(self):
+    def expec_lnPi(self, posterior=True):
         # check if E_t has been initialised. Only update alpha if it has. Otherwise E[lnPi] is given by the prior
-        if self.E_t != []:
+        if np.any(self.E_t) and posterior:
             self.post_Alpha()
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         for s in range(self.nscores): 
-            self.lnPi[:, s, :] = psi(self.alpha[:, s, :]) - psiSumAlpha      
+            self.lnPi[:, s, :] = psi(self.alpha[:, s, :]) - psiSumAlpha
 
     def expec_t(self):
         self.lnjoint()
@@ -428,7 +437,8 @@ class IBCC(object):
         joint = np.exp(joint)
         norma = np.sum(joint, axis=1)[:, np.newaxis]
         pT = joint / norma
-        self.E_t[self.testidxs, :] = pT      
+        self.E_t[self.testidxs, :] = pT  
+   
 # Likelihoods of observations and current estimates of parameters --------------------------------------------------
     def lnjoint(self, alldata=False):
         '''
