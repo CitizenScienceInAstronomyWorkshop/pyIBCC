@@ -597,9 +597,9 @@ class IBCC(object):
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
         initialguess = self.get_hyperparams()
-        #initial_nlml = self.neg_marginal_likelihood(initialguess, use_MAP)
-        #ftol = np.abs(initial_nlml / 1e3)
-        ftol = np.abs(np.log(self.heatGP[1].ls[0]) * 1e-4) 
+        initial_nlml = self.neg_marginal_likelihood(initialguess, use_MAP)
+        ftol = np.abs(initial_nlml / 1e3)
+        #ftol = np.abs(np.log(self.heatGP[1].ls[0]) * 1e-4) 
         self.conv_threshold = ftol / 10.0
         
         #opt_hyperparams = fmin_cobyla(self.neg_marginal_likelihood, initialguess, constraints, maxfun=maxiter, rhobeg=rhobeg, rhoend=rhoend)
