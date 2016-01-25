@@ -245,7 +245,9 @@ class IBCC(object):
         # self.testidxs only includes points with crowd labels!
         if testidxs != None:  # include the pre-specified set of unlabelled data points in the inference process. All
             # other data points are either training data or ignored.
-            self.testidxs = testidxs[self.observed_idxs]
+            if self.full_N < len(testidxs) + 1: 
+                self.full_N = len(testidxs) + 1
+            self.testidxs = testidxs[self.observed_idxs]            
         else:  # If the test indexes are not specified explicitly, assume that all data points with a NaN or a -1 in the
             # training data must be test indexes.
             self.testidxs = np.bitwise_or(np.isnan(self.goldlabels), self.goldlabels < 0)

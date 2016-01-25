@@ -107,7 +107,7 @@ class Evaluator(object):
                         
             diffs = tpr-FPR
             best = np.argmax(diffs)
-            #print  'The best threshold is %.3f at diff of %.3f, with TPR=%.3f and FPR=%.3f' % (thresholds[best], np.max(diffs), tpr[best], FPR[best])
+            print  'The best threshold is %.3f at diff of %.3f, with TPR=%.3f and FPR=%.3f' % (thresholds[best], np.max(diffs), tpr[best], FPR[best])
             best_thresholds[j] = thresholds[best]
                         
         if self.nclasses==2:
