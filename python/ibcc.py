@@ -245,9 +245,9 @@ class IBCC(object):
         # self.testidxs only includes points with crowd labels!
         if testidxs != None:  # include the pre-specified set of unlabelled data points in the inference process. All
             # other data points are either training data or ignored.
-            if self.full_N < len(testidxs) + 1: 
-                self.full_N = len(testidxs) + 1
-            self.testidxs = testidxs[self.observed_idxs]            
+            if self.full_N < len(testidxs): 
+                self.full_N = len(testidxs)
+            self.testidxs = testidxs[self.observed_idxs]
         else:  # If the test indexes are not specified explicitly, assume that all data points with a NaN or a -1 in the
             # training data must be test indexes.
             self.testidxs = np.bitwise_or(np.isnan(self.goldlabels), self.goldlabels < 0)
@@ -362,7 +362,7 @@ class IBCC(object):
         do implement EP or Gibbs' sampling etc.
         '''
         logging.info('IBCC: combining %i training points + %i noisy-labelled points' % (np.sum(self.trainidxs), 
-                                                                                        np.sum(self.testidxs)))
+                                                                                        len(self.observed_idxs)))
         oldL = -np.inf
         converged = False
         self.nIts = 0 #object state so we can check it later
