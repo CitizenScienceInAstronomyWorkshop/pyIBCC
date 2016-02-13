@@ -507,6 +507,8 @@ class IBCC(object):
         if self.verbose:
             logging.debug('EEnergy %.3f, H %.3f, lnpCT %.3f, lnqT %.3f, lnpKappa %.3f, lnqKappa %.3f, lnpPi %.3f, lnqPi %.3f' % \
                       (EEnergy, H, lnpCT, lnqT, lnpKappa, lnqKappa, lnpPi, lnqPi))
+            logging.debug('lnpCT-lnqT = %.4f. lnpKappa-lnqKappa = %.4f. lnpPi-lnqPi = %.4f' % (lnpCT-lnqT, 
+                                                                                   lnpKappa - lnqKappa, lnpPi - lnqPi))
         return L
 # Hyperparameter Optimisation ------------------------------------------------------------------------------------------
     def set_hyperparams(self,hyperparams):
