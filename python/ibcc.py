@@ -210,14 +210,14 @@ class IBCC(object):
         return crowdlabels
 
     def preprocess_goldlabels(self, goldlabels):
-        if goldlabels != None and self.sparse:
+        if np.any(goldlabels) and self.sparse:
             if self.full_N<len(goldlabels):
                 # the full set of test points that we output will come from the gold labels if longer than crowd labels
                 self.full_N = len(goldlabels)
             goldlabels = goldlabels[self.observed_idxs]
             
         # Find out how much training data and how many total data points we have
-        if goldlabels != None:
+        if np.any(goldlabels):
             len_t = goldlabels.shape[0]
             goldlabels[np.isnan(goldlabels)] = -1
         else:
@@ -230,7 +230,7 @@ class IBCC(object):
             self.N = len_t        
              
         # Make sure that goldlabels is the right size in case we have passed in a training set for the first idxs
-        if goldlabels == None:
+        if not np.any(goldlabels):
             self.goldlabels = np.zeros(self.N) - 1
         elif goldlabels.shape[0] < self.N:
             extension = np.zeros(self.N - goldlabels.shape[0]) - 1
