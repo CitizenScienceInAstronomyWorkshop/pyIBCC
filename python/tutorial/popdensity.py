@@ -66,7 +66,7 @@ Cscores = np.array(Cscores)[:, np.newaxis]
 C = np.concatenate((Cagents,Cobjects,Cscores), axis=1)
 alpha0 = np.ones((6,6,len(agentids)))
 alpha0[:, :, 5] = 2.0
-alpha0[np.arange(6),np.arange(6),:] += 100.0
+alpha0[np.arange(6),np.arange(6),:] += 1.0
 # alpha0[:,:,:] = np.array([[4.0, 2.0, 1.5, 1.0, 1.0, 2.0], [2.0, 4.0, 2.0, 1.5, 1.0, 2.5], [1.5, 2.0, 4.0, 2.0, 1.5, 2.5], 
 #                         [1.0, 1.5, 2.0, 4.0, 2.0, 2.5], [1.0, 1.0, 1.5, 2.0, 4.0, 3.0], [1.0, 1.0, 1.0, 1.0, 1.0, 4.0]])[:,:,np.newaxis]
 # alpha0 = np.tile(alpha0[:,:,np.newaxis], (1,1,len(agentids)))
@@ -75,6 +75,21 @@ alpha0[np.arange(6),np.arange(6),-1] += 20
 nu0 = np.array([1,1,1,1,1,1], dtype=float)
 combiner = ibcc.IBCC(nclasses=6, nscores=6, alpha0=alpha0, nu0=nu0)
 preds = combiner.combine_classifications(C)
+
+from scipy.stats import beta
+plt.figure()
+# for k in range(combiner.alpha.shape[2]):
+k = 0 # worker ID to plot
+alpha_k  = combiner.alpha[:, :, k]
+pi_k = alpha_k / np.sum(alpha_k, axis=1)[:, np.newaxis]
+print "Confusion matrix for worker %i" % k
+print pi_k
+    
+for j in range(alpha_k.shape[0]):
+    pdfj = beta.pdf(np.arange(20) / 20.0, alpha_k[j, j], np.sum(alpha_k[j, :]) - alpha_k[j,j] )
+    plt.plot(pdfj, label='True class %i' % j)
+plt.legend(location='best')
+
 
 results_subjectids = []
 for i in range(preds.shape[0]):
