@@ -85,10 +85,13 @@ pi_k = alpha_k / np.sum(alpha_k, axis=1)[:, np.newaxis]
 print "Confusion matrix for worker %i" % k
 print pi_k
     
+x = np.arange(20) / 20.0
 for j in range(alpha_k.shape[0]):
-    pdfj = beta.pdf(np.arange(20) / 20.0, alpha_k[j, j], np.sum(alpha_k[j, :]) - alpha_k[j,j] )
-    plt.plot(pdfj, label='True class %i' % j)
-plt.legend(location='best')
+    pdfj = beta.pdf(x, alpha_k[j, j], np.sum(alpha_k[j, :]) - alpha_k[j,j] )
+    plt.plot(x, pdfj, label='True class %i' % j)
+plt.legend(loc='best')
+plt.ylabel('density')
+plt.xlabel('p(correct annotation)')
 
 
 results_subjectids = []
