@@ -110,12 +110,16 @@ def _update_doc_distribution(X, exp_topic_word_distr, doc_topic_prior,
 
             # The optimal phi_{dwk} is proportional to
             # exp(E[log(theta_{dk})]) * exp(E[log(beta_{dw})]).
-            norm_phi = np.dot(exp_doc_topic_d, exp_topic_word_d) + EPS
+            
+            #normalisation
+            norm_phi = np.dot(exp_doc_topic_d, exp_topic_word_d) + EPS # size: K x W, i.e. no. topics x no. words
+            phi = exp_doc_topic_d[:, np.newaxis] * exp_topic_word_d / norm_phi[np.newaxis, :]
+            
+            doc_topic_d = np.dot(cnts, phi.T)
+            doc_topic_params = ... + doc_topic_prior
 
-            doc_topic_d = (exp_doc_topic_d * np.dot(cnts / norm_phi, exp_topic_word_d.T))
-            # Note: adds doc_topic_prior to doc_topic_d, in-place.
-            ...
-
+            exp_doc_topic_d = psi(doc_topic_params) - psi( np.sum(doc_topic_params) )
+            
             if mean_change(last_d, doc_topic_d) < mean_change_tol:
                 break
         doc_topic_distr[idx_d, :] = doc_topic_d
