@@ -12,7 +12,7 @@ Link: http://www.cs.princeton.edu/~mdhoffma/code/onlineldavb.tar
 # Author: Matthew D. Hoffman (original onlineldavb implementation)
 import numpy as np
 import scipy.sparse as sp
-from scipy.special import gammaln
+from scipy.special import gammaln, psi
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import (check_random_state, check_array,
@@ -112,10 +112,11 @@ def _update_doc_distribution(X, exp_topic_word_distr, doc_topic_prior,
             # exp(E[log(theta_{dk})]) * exp(E[log(beta_{dw})]).
             
             #normalisation
-            norm_phi = np.dot(exp_doc_topic_d, exp_topic_word_d) + EPS # size: K x W, i.e. no. topics x no. words
-            phi = exp_doc_topic_d[:, np.newaxis] * exp_topic_word_d / norm_phi[np.newaxis, :]
+            norm_phi = np.dot(exp_doc_topic_d, exp_topic_word_d) + EPS 
+            phi = exp_doc_topic_d[:, np.newaxis] * exp_topic_word_d / norm_phi[np.newaxis, :] # size: K x W, i.e. no. topics x no. words
+            # cnts has size 1 x W. Multiply the counts by the word likelihoods, and sum across all words:
             
-            doc_topic_d = np.dot(cnts, phi.T)
+            
             doc_topic_params = ... + doc_topic_prior
 
             exp_doc_topic_d = psi(doc_topic_params) - psi( np.sum(doc_topic_params) )
@@ -132,6 +133,7 @@ def _update_doc_distribution(X, exp_topic_word_distr, doc_topic_prior,
 
     return (doc_topic_distr, suff_stats)
 
+# doc_topic_d = np.dot(cnts, phi.T)
 
 class LatentDirichletAllocation(BaseEstimator, TransformerMixin):
     """Latent Dirichlet Allocation with online variational Bayes algorithm
