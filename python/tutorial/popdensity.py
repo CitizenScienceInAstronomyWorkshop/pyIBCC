@@ -10,40 +10,51 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+def load_zoo_data(zoodatafile):
+    # format of file: 
+    # user_id,user_ip,workflow_id,created_at,gold_standard,expert,metadata,annotations,subject_data
+    zoodata = pd.read_csv(zoodatafile, sep=',', parse_dates=False, index_col=False, usecols=[0,1,7,8], 
+                          skipinitialspace=True, quotechar='"')
+    userid = zoodata['user_id']
+    userip = zoodata['user_ip']
+    subjectdata = zoodata['subject_data']
+    annotations = zoodata['annotations']
+        
+    Cagents = []
+    Cobjects = []
+    Cscores = []    
+    for i, user in enumerate(userid):
+        annotation = json.loads(annotations[i])
+        score = annotation[0]["value"]
+        if score==6:
+            continue
+        else:
+            Cscores.append(score)
+        if not user or np.isnan(user):
+            user = userip[i]
+        if not user in agentids:
+            agentids[user] = len(agentids.keys()) 
+        Cagents.append(agentids[user])
+        subjectdict = json.loads(subjectdata[i])
+        subject = int(subjectdict.keys()[0])
+        if not subject in subjectids:
+            subjectids[subject] = len(subjectids.keys())
+            reverse_subjectids[subjectids[subject]] = subject
+        Cobjects.append(subjectids[subject])    
+        
+    return Cagents, Cobjects, Cscores, subjectdata
+
+# LOAD CROWDSOURCED DATA ----------------------------------------------
+
 zoodatafile = "./data/rescue_global_nepal_2015.csv"
-# format of file: 
-# user_id,user_ip,workflow_id,created_at,gold_standard,expert,metadata,annotations,subject_data
-zoodata = pd.read_csv(zoodatafile, sep=',', parse_dates=False, index_col=False, usecols=[0,1,7,8], 
-                      skipinitialspace=True, quotechar='"')
-userid = zoodata['user_id']
-userip = zoodata['user_ip']
-subjectdata = zoodata['subject_data']
-annotations = zoodata['annotations']
 
 agentids = {}
 subjectids = {}
 reverse_subjectids = {}
-Cagents = []
-Cobjects = []
-Cscores = []
-for i, user in enumerate(userid):
-    annotation = json.loads(annotations[i])
-    score = annotation[0]["value"]
-    if score==6:
-        continue
-    else:
-        Cscores.append(score)
-    if not user or np.isnan(user):
-        user = userip[i]
-    if not user in agentids:
-        agentids[user] = len(agentids.keys()) 
-    Cagents.append(agentids[user])
-    subjectdict = json.loads(subjectdata[i])
-    subject = int(subjectdict.keys()[0])
-    if not subject in subjectids:
-        subjectids[subject] = len(subjectids.keys())
-        reverse_subjectids[subjectids[subject]] = subject
-    Cobjects.append(subjectids[subject])
+
+Cagents, Cobjects, Cscores, subjectdata = load_zoo_data(zoodatafile)
+     
+# APPEND DATA FROM OSM to CROWDSOURCED DATASET -------------------------
      
 osmfile = "./data/OSM_labels.csv"
 osmdata = pd.read_csv(osmfile, sep=',', parse_dates=False, index_col=False, skipinitialspace=True, quotechar='"', 
@@ -59,6 +70,8 @@ for i, subject in enumerate(osm_subjects):
     Cobjects.append(subjectids[subject])
     score = osm_scores[i]
     Cscores.append(score)
+    
+# RUN IBCC --------------------------------------------------------------
     
 Cagents = np.array(Cagents)[:,np.newaxis]
 Cobjects = np.array(Cobjects)[:, np.newaxis]
@@ -76,6 +89,7 @@ nu0 = np.array([1,1,1,1,1,1], dtype=float)
 combiner = ibcc.IBCC(nclasses=6, nscores=6, alpha0=alpha0, nu0=nu0)
 preds = combiner.combine_classifications(C)
 
+# PLOT CONFUSION MATRIX ----------------------------------------------------
 from scipy.stats import beta
 plt.figure()
 # for k in range(combiner.alpha.shape[2]):
@@ -93,7 +107,7 @@ plt.legend(loc='best')
 plt.ylabel('density')
 plt.xlabel('p(correct annotation)')
 
-
+# SAVE RESULTS TO CSV FILE --------------------------------------------------
 results_subjectids = []
 for i in range(preds.shape[0]):
     results_subjectids.append(reverse_subjectids[i])
@@ -123,6 +137,8 @@ results = pd.DataFrame(data={'subject_id':results_subjectids, 'priority1': preds
                        index=None)
 results.to_csv("./output/zooresults_osm.csv", sep=',', index=False, float_format='%1.4f', 
                cols=['subject_id','priority1','priority2','priority3','priority4','priority5','no_priority','minx','miny','maxx','maxy'])    
+
+# TRANSLATING RESULTS BACK TO LATITUDE/LONGITUDE COORDINATES --------------------------------
 
 nepal_subjects = []
 for subject in results_subjectids:
@@ -164,6 +180,8 @@ for i, s in enumerate(osm_subjects):
         if s2==s:
             xcoords[i] = coordsdata['x'][j]
             ycoords[i] = coordsdata['y'][j]
+
+# PLOT THE MOST PROBABLE CATEGORIES AS A HEATMAP -----------------------------
 
 # get the chosen category from the crowd
 cs = np.cumsum(crowdpreds, axis=1)

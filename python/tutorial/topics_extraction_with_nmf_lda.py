@@ -82,3 +82,7 @@ print("done in %0.3fs." % (time() - t0))
 print("\nTopics in LDA model:")
 tf_feature_names = tf_vectorizer.get_feature_names()
 print_top_words(lda, tf_feature_names, n_top_words)
+
+# Model parameters:
+# lda.components_ # K x W
+# doc_topics_distr = lda.transform(tf)

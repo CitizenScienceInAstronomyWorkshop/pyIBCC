@@ -469,6 +469,7 @@ class LatentDirichletAllocation(BaseEstimator, TransformerMixin):
                     doc_topics_distr, _ = self._e_step(X, cal_sstats=False,
                                                        random_init=False,
                                                        parallel=parallel)
+                    #self.doc_topics_distr_ = doc_topics_distr
                     
                     # Bound is the lower bound on the model evidence. Maximise this until convergence
                     bound = self.perplexity(X, doc_topics_distr,
@@ -482,6 +483,8 @@ class LatentDirichletAllocation(BaseEstimator, TransformerMixin):
                     # Previous iteration's bound
                     last_bound = bound
                 self.n_iter_ += 1
+                
+        
         return self
 
     def transform(self, X):
@@ -503,7 +506,7 @@ class LatentDirichletAllocation(BaseEstimator, TransformerMixin):
 #                                  " Please fit model first.")
 
         # make sure feature size is the same in fitted model and in X
-        X = self._check_non_neg_array(X, "LatentDirichletAllocation.transform")
+        #X = self._check_non_neg_array(X, "LatentDirichletAllocation.transform")
         n_samples, n_features = X.shape
         if n_features != self.components_.shape[1]:
             raise ValueError(
