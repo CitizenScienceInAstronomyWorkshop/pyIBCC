@@ -112,7 +112,7 @@ def _update_doc_distribution(X, exp_topic_word_distr, doc_topic_prior,
 
             #normalisation: has size 1 x W 
             norm_phi = np.dot(exp_doc_topic_d, exp_topic_word_d) + EPS 
-            # phi has size K x W, i.e. no. topics x no. words
+            # phi has size K x W, i.e. no. topics x no. words
             phi = exp_doc_topic_d[:, np.newaxis] * exp_topic_word_d / norm_phi[np.newaxis, :] 
             
             doc_topic_params = np.sum(phi, axis=1) + doc_topic_prior 
@@ -426,9 +426,11 @@ class LatentDirichletAllocation(BaseEstimator, TransformerMixin):
         whom : string
             Who passed X to this function.
         """
-        X = X.data if sp.issparse(X) else X
-        if (X < 0).any():
+        X = check_array(X, accept_sparse='csr')
+        Xdata = X.data if sp.issparse(X) else X
+        if (Xdata < 0).any():
             raise ValueError("Negative values in data passed to %s" % whom)
+        return X
 
     def fit(self, X, y=None):
         """Learn model for the data X with variational Bayes method.
