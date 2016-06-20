@@ -115,7 +115,7 @@ def _update_doc_distribution(X, exp_topic_word_distr, doc_topic_prior,
             # phi has size K x W, i.e. no. topics x no. words
             phi = exp_doc_topic_d[:, np.newaxis] * exp_topic_word_d / norm_phi[np.newaxis, :] 
             
-            doc_topic_params = np.sum(phi, axis=1) + doc_topic_prior 
+            doc_topic_params = np.dot(phi, cnts) + doc_topic_prior 
             
             doc_topic_d = psi(doc_topic_params) - psi( np.sum(doc_topic_params) )
             exp_doc_topic_d = np.exp(doc_topic_d)
