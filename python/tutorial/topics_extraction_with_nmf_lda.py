@@ -68,7 +68,7 @@ print("Fitting LDA models with tf features, n_samples=%d and n_features=%d..."
       % (n_samples, n_features))
 
 topic_word_prior = None#100000#None
-doc_topic_prior = None#10000
+doc_topic_prior = 10000
 
 lda = LatentDirichletAllocation(n_topics=n_topics, max_iter=5,
                                 learning_method='online', learning_offset=50.,
@@ -84,5 +84,6 @@ tf_feature_names = tf_vectorizer.get_feature_names()
 print_top_words(lda, tf_feature_names, n_top_words)
 
 # Model parameters:
-# lda.components_ # K x W
-# doc_topics_distr = lda.transform(tf)
+#lda.components_ # K x W
+doc_topics_distr = lda.transform(tf)
+
