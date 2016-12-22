@@ -23,10 +23,16 @@ class HBCC(IBCC):
 # Initialisation ---------------------------------------------------------------------------------------------------
 
     def init_weights(self):
-        self.logw = self.expec_weights(np.ones(self.nclusters))
+        self.logw = self.expec_weights()
     
     def init_responsibilities(self):
-        self.logr = np.log(1.0 / self.nclusters)
+        self.r = 1.0 / self.nclusters + np.zeros((self.K, self.nclusters))
+        self.logr = np.log(self.r)        
+        
+    def init_t(self):
+        self.init_responsibilities()
+        self.init_weights()
+        super(HBCC, self).init_t()
         
     def init_lnPi(self):
         '''
@@ -165,3 +171,38 @@ class HBCC(IBCC):
         x = np.sum((self.alpha-1) * self.cluster_lnPi,1)
         z = gammaln(np.sum(self.alpha,1)) - np.sum(gammaln(self.alpha),1)
         return np.sum(x+z)
+    
+# Loader and Runner helper functions -------------------------------------------------------------------------------
+def load_combiner(config_file, ibcc_class=None):
+    dh = DataHandler()
+    dh.loadData(config_file)
+    if ibcc_class==None:
+        heatmapcombiner = IBCC(dh=dh)
+    else:
+        heatmapcombiner = ibcc_class(dh=dh)
+    return heatmapcombiner, dh    
+    
+def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
+    heatmapcombiner, dh = load_combiner(configFile, ibcc_class=HBCC)
+    #combine labels
+    heatmapcombiner.verbose = True
+    pT = heatmapcombiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
+                                          table_format=dh.table_format)
+
+    if dh.output_file is not None:
+        dh.save_targets(pT)
+
+    dh.save_pi(heatmapcombiner.alpha, heatmapcombiner.nclasses, heatmapcombiner.nscores)
+    dh.save_hyperparams(heatmapcombiner.alpha, heatmapcombiner.nu)
+    pT = dh.map_predictions_to_original_IDs(pT)
+    return pT, heatmapcombiner
+    
+if __name__ == '__main__':
+    
+    logging.basicConfig(level=logging.DEBUG)
+    
+    if len(sys.argv)>1:
+        configFile = sys.argv[1]
+    else:
+        configFile = './config/my_project.py'
+    load_and_run_ibcc(configFile)
