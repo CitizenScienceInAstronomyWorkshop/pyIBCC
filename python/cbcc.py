@@ -77,25 +77,24 @@ class CBCC(IBCC):
         nk = np.sum(self.r, axis=0)
         
         weight_concentration_ = (1. + nk, (self.conc_prior + np.hstack((np.cumsum(nk[::-1])[-2::-1], 0))))
-        
+        self.weight_conc = np.array(weight_concentration_)
         # estimate_log_weights
         
         digamma_sum = digamma(weight_concentration_[0] + weight_concentration_[1])
         digamma_a = digamma(weight_concentration_[0])
         
-        logp_cluster_vs_subsequent_clusters = digamma_a - digamma_sum
+        logp_current_vs_subsequent_clusters = digamma_a - digamma_sum
         
         digamma_b = digamma(weight_concentration_[1])
-        logp_subsequent_clusters_vs_current = digamma_b - digamma_sum
-        logp_subsequent = np.cumsum(logp_subsequent_clusters_vs_current)[:-1]
+        logp_subsequent_vs_current = digamma_b - digamma_sum
+        logp_subsequent = np.cumsum(logp_subsequent_vs_current)[:-1]
         logp_current_or_subsequent = np.hstack((0, logp_subsequent))  
         
-        self.logw = logp_cluster_vs_subsequent_clusters + logp_current_or_subsequent
+        self.Elogp_clusters = np.array((logp_current_vs_subsequent_clusters, logp_subsequent_vs_current))
+        self.logw = logp_current_vs_subsequent_clusters + logp_current_or_subsequent
 
     def expec_t(self):
         super(CBCC, self).expec_t()
-        self.expec_responsibilities()
-        self.expec_weights()
 
     def expec_responsibilities(self):
         # for each cluster value, compute the log likelihoods of the data. This will be a sum  
@@ -138,7 +137,11 @@ class CBCC(IBCC):
                     for l in range(self.nscores):
                         for cl in range(self.nclusters):
                             Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
-                            self.alpha_tr[j,l,cl] = np.sum( 
+                            if self.table_format_flag:
+                                self.alpha_tr[j,l,cl] = np.sum(                                
+                                   (self.C[l][self.trainidxs,:] * self.r[:, cl][np.newaxis, :]).T.dot(Tj).reshape(-1) )
+                            else:
+                                self.alpha_tr[j,l,cl] = np.sum( 
                                    self.C[l][self.trainidxs,:].multiply(self.r[:, cl][np.newaxis, :]).T.dot(Tj).reshape(-1) )
                             
             self.alpha_tr += self.alpha0
@@ -147,10 +150,17 @@ class CBCC(IBCC):
             for l in range(self.nscores):
                 Tj = self.E_t[self.testidxs, j].reshape((self.Ntest, 1))
                 for cl in range(self.nclusters):
-                    counts = (self.Ctest[l].multiply(self.r[:, cl][np.newaxis, :])).T.dot(Tj).reshape(-1)
+                    if self.table_format_flag:
+                        counts = (self.Ctest[l] * self.r[:, cl][np.newaxis, :]).T.dot(Tj).reshape(-1)
+                    else:
+                        counts = (self.Ctest[l].multiply(self.r[:, cl][np.newaxis, :])).T.dot(Tj).reshape(-1)
+                        
                 self.alpha[j, l, cl] = self.alpha_tr[j, l, cl] + np.sum(counts)
 
     def expec_lnPi(self, posterior=True):
+        self.expec_responsibilities()
+        self.expec_weights()
+        
         # check if E_t has been initialised. Only update alpha if it has. Otherwise E[lnPi] is given by the prior
         if np.any(self.E_t) and posterior:
             self.post_Alpha()
@@ -164,37 +174,55 @@ class CBCC(IBCC):
     def post_lnpi(self):
         x = np.sum((self.alpha0-1) * self.cluster_lnPi,1)
         z = gammaln(np.sum(self.alpha0,1)) - np.sum(gammaln(self.alpha0),1)
-        return np.sum(x+z)
+        
+        #cluster weights
+        weight_prior_params = np.array([1.0, self.conc_prior])[:, np.newaxis]
+        w_x = np.sum((weight_prior_params - 1) * self.Elogp_clusters)
+        w_z = np.sum(gammaln(np.sum(weight_prior_params, axis=0)) - np.sum(gammaln(weight_prior_params), axis=0))  
+        
+        # responsibilities
+        logp_membership = np.sum(self.r * self.logw[np.newaxis, :])
+        
+        return np.sum(x+z) + w_x + w_z + logp_membership
                     
     def q_lnPi(self):
         x = np.sum((self.alpha-1) * self.cluster_lnPi,1)
         z = gammaln(np.sum(self.alpha,1)) - np.sum(gammaln(self.alpha),1)
-        return np.sum(x+z)
+
+        #cluster weights        
+        w_x = np.sum((self.weight_conc - 1) * self.Elogp_clusters)
+        w_z = np.sum(gammaln(np.sum(self.weight_conc, axis=0)) - np.sum(gammaln(self.weight_conc), axis=0))  
+        
+        #responsibilities
+        logq_membership = np.sum(self.r * self.lnr)
+        
+        return np.sum(x+z) + w_x + w_z + logq_membership
     
 # Loader and Runner helper functions -------------------------------------------------------------------------------
 def load_combiner(config_file, ibcc_class=None):
     dh = DataHandler()
     dh.loadData(config_file)
     if ibcc_class==None:
-        heatmapcombiner = IBCC(dh=dh)
+        combiner = IBCC(dh=dh)
     else:
-        heatmapcombiner = ibcc_class(dh=dh)
-    return heatmapcombiner, dh    
+        combiner = ibcc_class(dh=dh)
+    return combiner, dh    
     
 def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
-    heatmapcombiner, dh = load_combiner(configFile, ibcc_class=CBCC)
+    combiner, dh = load_combiner(configFile, ibcc_class=CBCC)
     #combine labels
-    heatmapcombiner.verbose = True
-    pT = heatmapcombiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
+    combiner.verbose = True
+    combiner.uselowerbound = True
+    pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
                                           table_format=dh.table_format)
 
     if dh.output_file is not None:
         dh.save_targets(pT)
 
-    dh.save_pi(heatmapcombiner.alpha, heatmapcombiner.nclasses, heatmapcombiner.nscores)
-    dh.save_hyperparams(heatmapcombiner.alpha, heatmapcombiner.nu)
+    dh.save_pi(combiner.alpha, combiner.nclasses, combiner.nscores)
+    dh.save_hyperparams(combiner.alpha, combiner.nu)
     pT = dh.map_predictions_to_original_IDs(pT)
-    return pT, heatmapcombiner
+    return pT, combiner
     
 if __name__ == '__main__':
     

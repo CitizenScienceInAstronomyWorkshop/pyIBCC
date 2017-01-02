@@ -8,6 +8,7 @@ import ibcc
 import logging
 import numpy as np
 from dynibcc import DynIBCC
+from cbcc import CBCC
 from ibcc_balanced import BalancedIBCC
 
 def check_accuracy(pT, target_acc, goldfile='./data/gold_verify.csv'):
@@ -167,6 +168,51 @@ class Test(unittest.TestCase):
         pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=DynIBCC)
         check_outputsize(pT, combiner, (5,5,500))
         check_accuracy_multi(pT, 1) 
+ 
+# Clustering BCC---------------------------------------------------------------------------------------------------------
+     
+    def test_SparseList_withGold_cbcc(self):
+        #Gold labels is longer than the no. crowd-labelled data points
+        configFile = './config/sparse_gold.py'
+        pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=CBCC)
+        check_outputsize(pT, combiner, (2,2, combiner.nclusters))
+        check_accuracy(pT, 0.94)
+         
+    def test_Table_withGold_cbcc(self):
+        #Gold labels is longer than the no. crowd-labelled data points
+        configFile = './config/table_gold.py'
+        pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=CBCC)
+        check_outputsize(pT, combiner,(2,2, combiner.nclusters))
+        check_accuracy(pT, 0.94) 
+     
+    def test_SparseList_withGold_5classes_cbcc(self):
+        #Gold labels is longer than the no. crowd-labelled data points
+        configFile = './config/sparse_gold5.py'
+        pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=CBCC)
+        check_outputsize(pT, combiner,(5,5, combiner.nclusters))
+        check_accuracy_multi(pT, 0.99)
+        
+    def test_Table_withGold_5classes_cbcc(self):
+        #Gold labels is longer than the no. crowd-labelled data points
+        configFile = './config/table_gold5.py'
+        pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=CBCC)
+        check_outputsize(pT, combiner, (5,5, combiner.nclusters))
+        check_accuracy_multi(pT, 0.99) 
+    
+    def test_SparseList_lowerbound_cbcc(self):
+        #Gold labels is longer than the no. crowd-labelled data points
+        configFile = './config/sparse_gold_lowerbound.py'
+        pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=CBCC)
+        check_outputsize(pT, combiner, (2,2, combiner.nclusters))
+        check_accuracy(pT, 0.94)
+          
+    def test_Table_lowerbound_5classes_cbcc(self):
+        #Gold labels is longer than the no. crowd-labelled data points
+        configFile = './config/table_gold5_lowerbound.py'
+        pT, combiner = ibcc.load_and_run_ibcc(configFile, ibcc_class=CBCC)
+        check_outputsize(pT, combiner, (5,5, combiner.nclusters
+                                        ))
+        check_accuracy_multi(pT, 0.99)  
  
 # BALANCED IBCC -------------------------------------------------------------------------------------------------------
  
