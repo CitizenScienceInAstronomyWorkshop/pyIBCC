@@ -13,7 +13,7 @@ from scipy.stats import gamma
 from ibcc import IBCC
 from sklearn.mixture import BayesianGaussianMixture
 
-class HBCC(IBCC):
+class CBCC(IBCC):
       
 # Model parameters and hyper-parameters -----------------------------------------------------------------------------
 
@@ -23,7 +23,7 @@ class HBCC(IBCC):
 # Initialisation ---------------------------------------------------------------------------------------------------
 
     def init_weights(self):
-        self.logw = self.expec_weights()
+        self.expec_weights()
     
     def init_responsibilities(self):
         self.r = 1.0 / self.nclusters + np.zeros((self.K, self.nclusters))
@@ -32,7 +32,7 @@ class HBCC(IBCC):
     def init_t(self):
         self.init_responsibilities()
         self.init_weights()
-        super(HBCC, self).init_t()
+        super(CBCC, self).init_t()
         
     def init_lnPi(self):
         '''
@@ -74,7 +74,7 @@ class HBCC(IBCC):
         # resulting weight_concentration_ has two values, effectively parameters to a beta distribution where [0] is 
         # the probability of this cluster and 
         
-        nk = np.sum(self.r, axis=1)
+        nk = np.sum(self.r, axis=0)
         
         weight_concentration_ = (1. + nk, (self.conc_prior + np.hstack((np.cumsum(nk[::-1])[-2::-1], 0))))
         
@@ -93,7 +93,7 @@ class HBCC(IBCC):
         self.logw = logp_cluster_vs_subsequent_clusters + logp_current_or_subsequent
 
     def expec_t(self):
-        super(HBCC, self).expec_t()
+        super(CBCC, self).expec_t()
         self.expec_responsibilities()
         self.expec_weights()
 
@@ -101,9 +101,9 @@ class HBCC(IBCC):
         # for each cluster value, compute the log likelihoods of the data. This will be a sum  
         # over lnPi columns for the observed labels multiplied by E_t and summed over all classes and all data points
         # to get logp(C^{(k)} | cluster_k = cluster)        
-        loglikelihoods = np.zeros(self.nclusters)
+        loglikelihoods = np.zeros((self.K, self.nclusters))
         
-        self.cluster_lnPi = np.zeros(self.nclasses, self.nscores, self.nclusters)         
+        self.cluster_lnPi = np.zeros((self.nclasses, self.nscores, self.nclusters))         
         sumAlpha = np.sum(self.alpha, 1)
         psiSumAlpha = psi(sumAlpha)
         for s in range(self.nscores):
@@ -118,9 +118,8 @@ class HBCC(IBCC):
                     else:   
                         data_l = self.C[l].multiply(self.cluster_lnPi[j, l, cl])                        
                     data = data_l if data==[] else data+data_l
-                loglikelihoods[cl] += np.array((data * self.E_t[:, j][:, np.newaxis]).sum(axis=0)).reshape(-1)       
+                loglikelihoods[:, cl:cl+1] += data.T.dot(self.E_t[:, j][:, np.newaxis])
         
-        loglikelihoods = loglikelihoods[:, np.newaxis]
         logweights = self.logw[np.newaxis, :]
         
         weighted_log_prob = loglikelihoods + logweights
@@ -132,7 +131,7 @@ class HBCC(IBCC):
 
     def post_Alpha(self):  # Posterior Hyperparams
         # Save the counts from the training data so we only recalculate the test data on every iteration
-        if self.alpha_tr == []:
+        if not len(self.alpha_tr):
             self.alpha_tr = np.zeros(self.alpha.shape)
             if self.Ntrain:
                 for j in range(self.nclasses):
@@ -140,7 +139,7 @@ class HBCC(IBCC):
                         for cl in range(self.nclusters):
                             Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
                             self.alpha_tr[j,l,cl] = np.sum( 
-                                   (self.r[:, cl][np.newaxis, :] * self.C[l])[self.trainidxs,:].T.dot(Tj).reshape(-1) )
+                                   self.C[l][self.trainidxs,:].multiply(self.r[:, cl][np.newaxis, :]).T.dot(Tj).reshape(-1) )
                             
             self.alpha_tr += self.alpha0
         # Add the counts from the test data
@@ -148,7 +147,7 @@ class HBCC(IBCC):
             for l in range(self.nscores):
                 Tj = self.E_t[self.testidxs, j].reshape((self.Ntest, 1))
                 for cl in range(self.nclusters):
-                    counts = (self.r[:, cl][np.newaxis, :] * self.Ctest[l]).T.dot(Tj).reshape(-1)
+                    counts = (self.Ctest[l].multiply(self.r[:, cl][np.newaxis, :])).T.dot(Tj).reshape(-1)
                 self.alpha[j, l, cl] = self.alpha_tr[j, l, cl] + np.sum(counts)
 
     def expec_lnPi(self, posterior=True):
@@ -159,7 +158,7 @@ class HBCC(IBCC):
         psiSumAlpha = psi(sumAlpha)
         for j in range(self.nclasses):
             for s in range(self.nscores): 
-                self.lnPi[j, s, :] = np.sum(self.r * (psi(self.alpha[j, s, :]) - psiSumAlpha)[np.newaxis, :], axis=1)
+                self.lnPi[:, s, :] = (psi(self.alpha[:, s, :]) - psiSumAlpha)[np.newaxis, :].dot(self.r.T)
  
 # Likelihoods of observations and current estimates of parameters --------------------------------------------------
     def post_lnpi(self):
@@ -183,7 +182,7 @@ def load_combiner(config_file, ibcc_class=None):
     return heatmapcombiner, dh    
     
 def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
-    heatmapcombiner, dh = load_combiner(configFile, ibcc_class=HBCC)
+    heatmapcombiner, dh = load_combiner(configFile, ibcc_class=CBCC)
     #combine labels
     heatmapcombiner.verbose = True
     pT = heatmapcombiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
