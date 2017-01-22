@@ -132,15 +132,17 @@ class IBCC(object):
                 self.alpha0_cluster = self.alpha0
                 self.alpha0_length = self.alpha0_cluster.shape[2]
             self.alpha0 = self.alpha0_cluster[:, :, self.clusteridxs_alpha0]        
-        elif len(self.alpha0.shape) == 3 and self.alpha0.shape[2] < self.K:
-            # We have a new dataset with more agents than before -- create more priors.
-            nnew = self.K - self.alpha0.shape[2]
-            alpha0new = self.alpha0[:, :, 0]
-            alpha0new = alpha0new[:, :, np.newaxis]
-            alpha0new = np.repeat(alpha0new, nnew, axis=2)
-            self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
-        elif len(self.alpha0.shape)==2:
-            self.alpha0  = self.alpha0[:,:,np.newaxis]
+        else:
+            if len(self.alpha0.shape)==2:
+                self.alpha0  = self.alpha0[:,:,np.newaxis]
+            
+            if self.alpha0.shape[2] < self.K:
+                # We have a new dataset with more agents than before -- create more priors.
+                nnew = self.K - self.alpha0.shape[2]
+                alpha0new = self.alpha0[:, :, 0]
+                alpha0new = alpha0new[:, :, np.newaxis]
+                alpha0new = np.repeat(alpha0new, nnew, axis=2)
+                self.alpha0 = np.concatenate((self.alpha0, alpha0new), axis=2)
         # Make sure self.alpha is the right size as well. Values of self.alpha not important as we recalculate below
         self.alpha0 = self.alpha0[:, :, :self.K] # make this the right size if there are fewer classifiers than expected
         self.alpha = np.zeros((self.nclasses, self.nscores, self.K), dtype=np.float) + self.alpha0
@@ -396,7 +398,10 @@ class IBCC(object):
         logging.info('IBCC finished in %i iterations (max iterations allowed = %i).' % (self.nIts, self.max_iterations))
 
 # Posterior Updates to Hyperparameters --------------------------------------------------------------------------------
-    def post_Alpha(self):  # Posterior Hyperparams
+    def train_alpha_counts(self, prior_pseudocounts=[]):
+        if not len(prior_pseudocounts):
+            prior_pseudocounts = self.alpha0
+        
         # Save the counts from the training data so we only recalculate the test data on every iteration
         if self.alpha_tr == []:
             self.alpha_tr = np.zeros(self.alpha.shape)
@@ -405,7 +410,11 @@ class IBCC(object):
                     for l in range(self.nscores):
                         Tj = self.E_t[self.trainidxs, j].reshape((self.Ntrain, 1))
                         self.alpha_tr[j,l,:] = self.C[l][self.trainidxs,:].T.dot(Tj).reshape(-1)
-            self.alpha_tr += self.alpha0
+            self.alpha_tr += prior_pseudocounts
+
+    def post_Alpha(self):  # Posterior Hyperparams
+        self.train_alpha_counts()
+        
         # Add the counts from the test data
         for j in range(self.nclasses):
             for l in range(self.nscores):
@@ -596,7 +605,7 @@ class IBCC(object):
     
     def optimize_hyperparams(self, maxiter=20, use_MAP=False):
         ''' 
-        Assuming gamma distributions over the hyper-parameters, we find the MAP values. The heatmapcombiner object is updated
+        Assuming gamma distributions over the hyper-parameters, we find the MAP values. The combiner object is updated
         to contain the optimal values, searched for using BFGS.
         '''
         #Evaluate the first guess using the current value of the hyper-parameters
@@ -623,25 +632,26 @@ def load_combiner(config_file, ibcc_class=None):
     dh = DataHandler()
     dh.loadData(config_file)
     if ibcc_class==None:
-        heatmapcombiner = IBCC(dh=dh)
+        combiner = IBCC(dh=dh)
     else:
-        heatmapcombiner = ibcc_class(dh=dh)
-    return heatmapcombiner, dh
+        combiner = ibcc_class(dh=dh)
+    return combiner, dh
 
 def load_and_run_ibcc(configFile, ibcc_class=None, optimise_hyperparams=False):
-    heatmapcombiner, dh = load_combiner(configFile, ibcc_class)
+    combiner, dh = load_combiner(configFile, ibcc_class)
     #combine labels
-    heatmapcombiner.verbose = True
-    pT = heatmapcombiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
+    combiner.verbose = True
+    combiner.uselowerbound = True
+    pT = combiner.combine_classifications(dh.crowdlabels, dh.goldlabels, optimise_hyperparams=optimise_hyperparams, 
                                           table_format=dh.table_format)
 
     if dh.output_file is not None:
         dh.save_targets(pT)
 
-    dh.save_pi(heatmapcombiner.alpha, heatmapcombiner.nclasses, heatmapcombiner.nscores)
-    dh.save_hyperparams(heatmapcombiner.alpha, heatmapcombiner.nu)
+    dh.save_pi(combiner.alpha, combiner.nclasses, combiner.nscores)
+    dh.save_hyperparams(combiner.alpha, combiner.nu)
     pT = dh.map_predictions_to_original_IDs(pT)
-    return pT, heatmapcombiner
+    return pT, combiner
     
 if __name__ == '__main__':
     
