@@ -9,6 +9,7 @@ from scipy.special import psi, gammaln, digamma
 from ibccdata import DataHandler
 from scipy.optimize import fmin, fmin_cobyla
 from scipy.stats import gamma
+import antoniak
 
 import ibcc 
 from sklearn.mixture import BayesianGaussianMixture
@@ -362,22 +363,31 @@ class HCBCC(CBCC):
             logv_j = logv_j.dot(self.r.T)
         
             # s^(k)_{j, l} ~ Antoniak( n^(k)_{j, l}, \beta_j^{q_k} \eta_{j, l}^{q_k} )
-            counts = worker_counts[j, :, :]
-            conc = (self.beta[j, :, :] * self.eta[j, :, :]).dot(self.r.T)
-            
             s_j = np.zeros((self.nscores, self.K))
-            for i in range(int(np.max(counts))):
-                s_j += conc / (conc + i - 1) * (i<counts)
-            s_j_total = s_j.dot(self.r)
-            
+            for l in range(self.nscores):
+                counts = worker_counts[j, l, :]
+                conc = (self.beta[j, l, :] * self.eta[j, l, :])
+                #s_j = np.zeros((self.nscores, self.K))
+                #for i in range(int(np.max(counts))):
+                #    s_j += conc / (conc + i - 1) * (i<counts)
+                #P1 = counts 
+                #s_j = conc * P1 * (psi(conc * P1 + counts) - psi(conc * P1))
+                for k in range(self.K):
+                    for cl in range(self.nclusters):  
+                        # !!! Counts cannot be fractions!!!
+                        s_j[l, k] += antoniak.expectation(conc[cl], counts[k]) * self.r[k, cl]
+            # the s should be related to the expected pseudo-count for each cluster member...
+            # could get expectation of s by sampling n 
+                
+                
             # \eta_j^(m) ~ Dir( sum_{ k where q_k=m } s^(k)_{j, .} + \phi_j \gamma_j )
             # We need to determine expectation of \eta
-            self.phigamma = s_j_total + self.phi0[j, :, :] * self.gamma0[j, :, :]
-            self.eta[j, :, :] /= np.sum(self.eta[j, :, :], axis=0)[np.newaxis, :]
+            self.phigamma = s_j + self.phi0[j, :, :] * self.gamma0[j, :, :]
+            self.eta[j, :, :] = self.phigamma / np.sum(self.phigamma[j, :, :], axis=0)[np.newaxis, :] 
          
             # \beta_j^(k) ~ Gamma( sum_{k where q_k=m} sum_{l} s_{j, l}^(k) + a_j, b_j - sum_{k where q_k=m} log(v_{j}^(k) ) )
             # we need expectation of beta
-            self.a[j, :, :] = np.sum(s_j_total, axis=0) + self.a0
+            self.a[j, :, :] = np.sum(s_j, axis=0) + self.a0
             self.b[j, :, :] = self.b0 - logv_j.dot(self.r)
         self.beta = self.a / self.b 
         
